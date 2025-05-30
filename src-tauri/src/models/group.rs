@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
-use super::file::{SharedFile, FileEncryptionMetadata};
+use super::file::{SharedFile};
 
 /// Represents a secure group for file sharing using Signal's Sender Key protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]
