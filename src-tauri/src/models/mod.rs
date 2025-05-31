@@ -3,6 +3,8 @@ pub mod group;
 pub mod file;
 pub mod error;
 pub mod demo;
+pub mod config;
+pub mod vault;
 
 // Re-export user types
 pub use user::{
@@ -26,4 +28,14 @@ pub use file::{
 // Re-export error types
 pub use error::{
     AppError, CryptoError, FileError, GroupError, UserError, NetworkError, AppResult
+};
+
+// Re-export config types
+pub use config::{
+    AppConfig, WindowConfig, VaultConfig, AppPreferences, ThemeMode
+};
+
+// Re-export vault types
+pub use vault::{
+    VaultMasterKey, VaultMetadata, CreateVaultRequest, CreateVaultResponse
 };
