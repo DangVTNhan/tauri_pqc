@@ -25,6 +25,17 @@ impl ConfigManager {
         })
     }
 
+    /// Create a new configuration manager with a specific path (for testing)
+    #[cfg(test)]
+    pub fn new_with_path(config_path: PathBuf) -> AppResult<Self> {
+        let config = Self::load_or_create_config(&config_path)?;
+
+        Ok(Self {
+            config_path,
+            config,
+        })
+    }
+
     /// Get the configuration file path
     pub fn get_config_path(_app_handle: &tauri::AppHandle) -> AppResult<PathBuf> {
         // Use the user's home directory: ~/Library/Application Support/myfilestorage/settings.json

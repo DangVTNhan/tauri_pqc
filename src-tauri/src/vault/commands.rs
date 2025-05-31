@@ -2,17 +2,17 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::State;
 use crate::config::commands::ConfigState;
+use crate::config::ConfigManager;
 use crate::models::{
     AppError, AppResult, CreateVaultRequest, CreateVaultResponse,
     VaultMasterKey, VaultMetadata, VaultConfig
 };
 use crate::store::encryption::EncryptionService;
 
-/// Create a new vault with encrypted directory structure
-#[tauri::command]
-pub async fn create_vault(
-    state: State<'_, ConfigState>,
+/// Internal function to create a vault (synchronous)
+pub fn create_vault_sync(
     request: CreateVaultRequest,
+    manager: &mut ConfigManager,
 ) -> AppResult<CreateVaultResponse> {
     // Validate input
     if request.name.trim().is_empty() {
@@ -124,26 +124,42 @@ pub async fn create_vault(
     );
 
     // Add vault to application configuration
-    {
+    let config = manager.get_config_mut();
+    config.add_vault(vault_config.clone());
+    manager.save_config()
+        .map_err(|e| AppError::InternalError(format!(
+            "Failed to save configuration: {}",
+            e
+        )))?;
+
+    Ok(CreateVaultResponse {
+        vault_config,
+        message: format!("Vault '{}' created successfully", request.name),
+    })
+}
+
+/// Create a new vault with encrypted directory structure
+#[tauri::command]
+pub async fn create_vault(
+    state: State<'_, ConfigState>,
+    request: CreateVaultRequest,
+) -> AppResult<CreateVaultResponse> {
+    // Clone the request to avoid borrowing issues
+    let request_clone = request.clone();
+
+    // Lock the manager in a separate scope to avoid Send issues
+    let result = {
         let mut manager = state.manager.lock()
             .map_err(|e| AppError::InternalError(format!(
                 "Failed to lock config manager: {}",
                 e
             )))?;
 
-        let config = manager.get_config_mut();
-        config.add_vault(vault_config.clone());
-        manager.save_config()
-            .map_err(|e| AppError::InternalError(format!(
-                "Failed to save configuration: {}",
-                e
-            )))?;
-    }
+        // Call the internal function synchronously within the lock scope
+        create_vault_sync(request_clone, &mut manager)
+    };
 
-    Ok(CreateVaultResponse {
-        vault_config,
-        message: format!("Vault '{}' created successfully", request.name),
-    })
+    result
 }
 
 /// Verify vault password by attempting to decrypt master key
