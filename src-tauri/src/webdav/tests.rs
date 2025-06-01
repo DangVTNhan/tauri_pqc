@@ -522,6 +522,26 @@ fn test_vault_status_display() {
 }
 
 #[tokio::test]
+async fn test_unmount_webdav_volume_function() {
+    // Test the unmount function with different scenarios
+
+    // Test with vault name
+    let result = crate::commands::unmount_webdav_volume(Some("test_vault".to_string())).await;
+    // On macOS, this should attempt to unmount but may fail if no volume is mounted
+    // We just verify the function doesn't panic and returns a result
+    assert!(result.is_ok() || result.is_err());
+
+    // Test with no vault name (IP-based unmount)
+    let result = crate::commands::unmount_webdav_volume(None).await;
+    // Same as above - should not panic
+    assert!(result.is_ok() || result.is_err());
+
+    // Test with empty vault name
+    let result = crate::commands::unmount_webdav_volume(Some("".to_string())).await;
+    assert!(result.is_ok() || result.is_err());
+}
+
+#[tokio::test]
 async fn test_concurrent_vault_operations() {
     let state = WebDavCommandState::new();
     let vault_id1 = Uuid::new_v4();

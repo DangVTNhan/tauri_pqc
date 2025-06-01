@@ -33,6 +33,7 @@ pub fn run() {
             commands::greet,
             commands::greet_multi_param,
             commands::open_url,
+            commands::unmount_webdav_volume,
             // Configuration commands
             config::commands::load_config,
             config::commands::save_config,

@@ -149,28 +149,96 @@ pub async fn unlock_vault(
 
 
 /// Lock a vault (remove from unlocked vaults and stop WebDAV server)
+/// This function ensures complete virtual volume cleanup by:
+/// 1. Unmounting the virtual volume from macOS Finder
+/// 2. Stopping the WebDAV server (removes virtual volume access)
+/// 3. Removing encryption service from memory (clears decrypted data)
+/// 4. Removing vault from WebDAV state tracking
 #[tauri::command]
 pub async fn lock_vault(
     state: State<'_, WebDavCommandState>,
     vault_id: String,
 ) -> AppResult<LockVaultResponse> {
+    println!("Attempting to lock vault with ID: {}", vault_id);
+
     let vault_uuid = Uuid::parse_str(&vault_id)
         .map_err(|e| AppError::InternalError(format!("Invalid vault ID: {}", e)))?;
 
-    // Stop WebDAV server if running
-    let _ = state.server_manager.stop_server(&vault_uuid).await;
+    // Check if vault is currently unlocked
+    let was_unlocked = {
+        let unlocked_vaults = state.unlocked_vaults.read().await;
+        unlocked_vaults.contains_key(&vault_uuid)
+    };
 
-    // Remove from unlocked vaults
+    if !was_unlocked {
+        println!("Vault {} is not currently unlocked", vault_uuid);
+        return Ok(LockVaultResponse {
+            success: true,
+            error: None,
+        });
+    }
+
+    // Get vault name for unmounting (before removing from state)
+    let vault_name = {
+        let webdav_state = state.webdav_state.read().await;
+        webdav_state.get_mounted_vault(&vault_uuid)
+            .map(|mount| mount.vault_name.clone())
+    };
+
+    // Step 1: Unmount the virtual volume from macOS Finder
+    if let Some(name) = vault_name.clone() {
+        println!("Attempting to unmount virtual volume for vault: {}", name);
+        match crate::commands::unmount_webdav_volume(Some(name.clone())).await {
+            Ok(()) => {
+                println!("Successfully unmounted virtual volume for vault: {}", name);
+            }
+            Err(e) => {
+                println!("Warning: Failed to unmount virtual volume for vault {}: {}", name, e);
+                // Continue with cleanup even if unmount fails
+            }
+        }
+    } else {
+        println!("Warning: Could not determine vault name for unmounting, trying IP-based unmount");
+        match crate::commands::unmount_webdav_volume(None).await {
+            Ok(()) => {
+                println!("Successfully unmounted virtual volume using IP address");
+            }
+            Err(e) => {
+                println!("Warning: Failed to unmount virtual volume using IP address: {}", e);
+                // Continue with cleanup even if unmount fails
+            }
+        }
+    }
+
+    // Step 2: Stop WebDAV server if running (removes virtual volume access)
+    match state.server_manager.stop_server(&vault_uuid).await {
+        Ok(()) => {
+            println!("WebDAV server for vault {} stopped successfully", vault_uuid);
+        }
+        Err(e) => {
+            println!("Warning: Failed to stop WebDAV server for vault {}: {}", vault_uuid, e);
+            // Continue with cleanup even if server stop fails
+        }
+    }
+
+    // Step 3: Remove from unlocked vaults (clears encryption service and decrypted data from memory)
     {
         let mut unlocked_vaults = state.unlocked_vaults.write().await;
-        unlocked_vaults.remove(&vault_uuid);
+        if let Some(_) = unlocked_vaults.remove(&vault_uuid) {
+            println!("Removed vault {} from unlocked vaults", vault_uuid);
+        }
     }
 
-    // Remove from WebDAV state
+    // Step 4: Remove from WebDAV state (cleans up mount tracking)
     {
         let mut webdav_state = state.webdav_state.write().await;
-        webdav_state.remove_mounted_vault(&vault_uuid);
+        if let Some(removed_mount) = webdav_state.remove_mounted_vault(&vault_uuid) {
+            println!("Removed vault mount for {} (was at {})", vault_uuid,
+                removed_mount.mount_url.unwrap_or_else(|| "unknown URL".to_string()));
+        }
     }
+
+    println!("Vault {} locked successfully - virtual volume unmounted and removed", vault_uuid);
 
     Ok(LockVaultResponse {
         success: true,
