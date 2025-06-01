@@ -134,6 +134,7 @@ impl Drop for MasterKey {
 }
 
 /// Encryption service for secure data storage
+#[derive(Clone)]
 pub struct EncryptionService {
     master_key: MasterKey,
     config: EncryptionConfig,

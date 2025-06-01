@@ -66,8 +66,6 @@ pub struct VaultConfig {
     pub path: PathBuf,
     /// Vault file name
     pub file_name: String,
-    /// Whether this vault is currently active/selected
-    pub is_active: bool,
     /// Last accessed timestamp (ISO 8601 string)
     pub last_accessed: Option<String>,
     /// Whether to auto-unlock this vault on startup
@@ -82,7 +80,6 @@ impl VaultConfig {
             name,
             path,
             file_name,
-            is_active: false,
             last_accessed: None,
             auto_unlock: false,
         }
@@ -186,12 +183,6 @@ impl AppConfig {
 
     /// Add a new vault to the configuration
     pub fn add_vault(&mut self, vault: VaultConfig) {
-        // Deactivate all other vaults if this one is active
-        if vault.is_active {
-            for existing_vault in &mut self.vaults {
-                existing_vault.is_active = false;
-            }
-        }
         self.vaults.push(vault);
         self.update_modified_time();
     }
@@ -207,28 +198,7 @@ impl AppConfig {
         removed
     }
 
-    /// Get the currently active vault
-    pub fn active_vault(&self) -> Option<&VaultConfig> {
-        self.vaults.iter().find(|v| v.is_active)
-    }
 
-    /// Set a vault as active by ID
-    pub fn set_active_vault(&mut self, vault_id: &Uuid) -> bool {
-        let mut found = false;
-        for vault in &mut self.vaults {
-            if vault.id == *vault_id {
-                vault.is_active = true;
-                vault.mark_accessed();
-                found = true;
-            } else {
-                vault.is_active = false;
-            }
-        }
-        if found {
-            self.update_modified_time();
-        }
-        found
-    }
 
     /// Update the last modified timestamp
     pub fn update_modified_time(&mut self) {
@@ -252,11 +222,7 @@ impl AppConfig {
             }
         }
 
-        // Check that only one vault is active
-        let active_count = self.vaults.iter().filter(|v| v.is_active).count();
-        if active_count > 1 {
-            return Err("Only one vault can be active at a time".to_string());
-        }
+
 
         Ok(())
     }

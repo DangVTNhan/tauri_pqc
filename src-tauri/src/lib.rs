@@ -10,6 +10,7 @@ mod models;
 mod store;
 mod config;
 mod vault;
+mod webdav;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,11 +23,16 @@ pub fn run() {
                 .expect("Failed to initialize configuration system");
             app.manage(config_state);
 
+            // Initialize WebDAV system
+            let webdav_state = webdav::commands::WebDavCommandState::new();
+            app.manage(webdav_state);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::greet_multi_param,
+            commands::open_url,
             // Configuration commands
             config::commands::load_config,
             config::commands::save_config,
@@ -34,8 +40,6 @@ pub fn run() {
             config::commands::get_config_path,
             config::commands::add_vault,
             config::commands::remove_vault,
-            config::commands::set_active_vault,
-            config::commands::get_active_vault,
             config::commands::update_window_config,
             config::commands::update_preferences,
             config::commands::backup_config,
@@ -49,6 +53,10 @@ pub fn run() {
             vault::commands::verify_vault_password,
             vault::commands::load_vault_metadata,
             vault::commands::is_valid_vault,
+            // WebDAV commands
+            webdav::commands::unlock_vault,
+            webdav::commands::lock_vault,
+            webdav::commands::get_vault_statuses,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

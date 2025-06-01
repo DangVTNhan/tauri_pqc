@@ -5,6 +5,7 @@ pub mod error;
 pub mod demo;
 pub mod config;
 pub mod vault;
+pub mod webdav;
 
 // Re-export user types
 pub use user::{
@@ -38,4 +39,11 @@ pub use config::{
 // Re-export vault types
 pub use vault::{
     VaultMasterKey, VaultMetadata, CreateVaultRequest, CreateVaultResponse
+};
+
+// Re-export webdav types
+pub use webdav::{
+    WebDavConfig, VaultStatus, VaultMount, UnlockVaultRequest,
+    UnlockVaultResponse, LockVaultResponse,
+    WebDavState
 };

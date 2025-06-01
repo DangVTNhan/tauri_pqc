@@ -22,7 +22,6 @@ export interface VaultConfig {
   name: string;
   path: string;
   file_name: string;
-  is_active: boolean;
   last_accessed?: string;
   auto_unlock: boolean;
 }
@@ -79,7 +78,8 @@ export const defaultAppConfig: AppConfig = {
   version: "1.0.0",
   window: defaultWindowConfig,
   vaults: [],
-  database_path: "~/Library/Application Support/myfilestorage/secure_storage.db",
+  database_path:
+    "~/Library/Application Support/myfilestorage/secure_storage.db",
   preferences: defaultAppPreferences,
   last_modified: undefined,
 };
@@ -94,7 +94,6 @@ export function createVaultConfig(
     name,
     path,
     file_name: fileName,
-    is_active: false,
     last_accessed: undefined,
     auto_unlock: false,
   };
@@ -147,7 +146,10 @@ export function validateVaultConfig(config: Partial<VaultConfig>): string[] {
 export function validateAppConfig(config: Partial<AppConfig>): string[] {
   const errors: string[] = [];
 
-  if (config.database_path !== undefined && config.database_path.trim().length === 0) {
+  if (
+    config.database_path !== undefined &&
+    config.database_path.trim().length === 0
+  ) {
     errors.push("Database path cannot be empty");
   }
 
@@ -158,16 +160,10 @@ export function validateAppConfig(config: Partial<AppConfig>): string[] {
   if (config.vaults) {
     config.vaults.forEach((vault, index) => {
       const vaultErrors = validateVaultConfig(vault);
-      vaultErrors.forEach(error => {
+      vaultErrors.forEach((error) => {
         errors.push(`Vault ${index + 1}: ${error}`);
       });
     });
-
-    // Check that only one vault is active
-    const activeVaults = config.vaults.filter(v => v.is_active);
-    if (activeVaults.length > 1) {
-      errors.push("Only one vault can be active at a time");
-    }
   }
 
   return errors;
@@ -197,7 +193,6 @@ export function isVaultConfig(obj: any): obj is VaultConfig {
     typeof obj.name === "string" &&
     typeof obj.path === "string" &&
     typeof obj.file_name === "string" &&
-    typeof obj.is_active === "boolean" &&
     typeof obj.auto_unlock === "boolean"
   );
 }

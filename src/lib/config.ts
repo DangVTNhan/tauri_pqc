@@ -99,8 +99,29 @@ export class ConfigManager {
       console.log("Vault created successfully:", response.message);
       await this.loadConfig(); // Reload to get the updated configuration
     } catch (error) {
-      console.error("Failed to create vault:", error);
-      throw new Error(`Failed to create vault: ${error}`);
+      console.error("Failed to create vault - Full error object:", error);
+      console.error("Error type:", typeof error);
+      console.error("Error constructor:", error?.constructor?.name);
+
+      let errorMessage = "Unknown error occurred";
+
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        console.error("Error message:", error.message);
+        console.error("Error stack:", error.stack);
+      } else if (typeof error === "string") {
+        errorMessage = error;
+      } else if (error && typeof error === "object") {
+        try {
+          errorMessage = JSON.stringify(error, null, 2);
+        } catch (jsonError) {
+          errorMessage = String(error);
+        }
+      } else {
+        errorMessage = String(error);
+      }
+
+      throw new Error(`Failed to create vault: ${errorMessage}`);
     }
   }
 
@@ -133,32 +154,6 @@ export class ConfigManager {
     } catch (error) {
       console.error("Failed to remove vault:", error);
       throw new Error(`Failed to remove vault: ${error}`);
-    }
-  }
-
-  /**
-   * Set the active vault
-   */
-  public async setActiveVault(vaultId: string): Promise<void> {
-    try {
-      await invoke<string>("set_active_vault", { vaultId });
-      await this.loadConfig(); // Reload to get the updated configuration
-    } catch (error) {
-      console.error("Failed to set active vault:", error);
-      throw new Error(`Failed to set active vault: ${error}`);
-    }
-  }
-
-  /**
-   * Get the currently active vault
-   */
-  public async getActiveVault(): Promise<VaultConfig | null> {
-    try {
-      const vault = await invoke<VaultConfig | null>("get_active_vault");
-      return vault;
-    } catch (error) {
-      console.error("Failed to get active vault:", error);
-      throw new Error(`Failed to get active vault: ${error}`);
     }
   }
 

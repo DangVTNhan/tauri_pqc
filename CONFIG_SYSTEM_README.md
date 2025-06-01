@@ -130,8 +130,6 @@ interface AppPreferences {
 ### Vault Management
 - `add_vault(vault)`: Add new vault configuration
 - `remove_vault(vault_id)`: Remove vault by ID
-- `set_active_vault(vault_id)`: Set active vault
-- `get_active_vault()`: Get currently active vault
 
 ### Preferences
 - `update_window_config(window_config)`: Update window settings
@@ -159,7 +157,6 @@ await configManager.addVault({
   name: "My Secure Vault",
   path: "/path/to/vault",
   file_name: "vault.db",
-  is_active: false,
   auto_unlock: false,
 });
 

@@ -26,7 +26,7 @@ pub async fn load_config(
 ) -> AppResult<AppConfig> {
     let manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     Ok(manager.get_config().clone())
 }
 
@@ -38,7 +38,7 @@ pub async fn save_config(
 ) -> AppResult<String> {
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     manager.update_config(config)?;
     Ok("Configuration saved successfully".to_string())
 }
@@ -69,11 +69,11 @@ pub async fn add_vault(
 ) -> AppResult<String> {
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     let config = manager.get_config_mut();
     config.add_vault(vault.clone());
     manager.save_config()?;
-    
+
     Ok(format!("Vault '{}' added successfully", vault.name))
 }
 
@@ -85,13 +85,13 @@ pub async fn remove_vault(
 ) -> AppResult<String> {
     let vault_uuid = Uuid::parse_str(&vault_id)
         .map_err(|e| AppError::InternalError(format!("Invalid vault ID: {}", e)))?;
-    
+
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     let config = manager.get_config_mut();
     let removed = config.remove_vault(&vault_uuid);
-    
+
     if removed {
         manager.save_config()?;
         Ok("Vault removed successfully".to_string())
@@ -100,39 +100,7 @@ pub async fn remove_vault(
     }
 }
 
-/// Set the active vault
-#[tauri::command]
-pub async fn set_active_vault(
-    state: State<'_, ConfigState>,
-    vault_id: String,
-) -> AppResult<String> {
-    let vault_uuid = Uuid::parse_str(&vault_id)
-        .map_err(|e| AppError::InternalError(format!("Invalid vault ID: {}", e)))?;
-    
-    let mut manager = state.manager.lock()
-        .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
-    let config = manager.get_config_mut();
-    let success = config.set_active_vault(&vault_uuid);
-    
-    if success {
-        manager.save_config()?;
-        Ok("Active vault set successfully".to_string())
-    } else {
-        Err(AppError::InternalError("Vault not found".to_string()))
-    }
-}
 
-/// Get the currently active vault
-#[tauri::command]
-pub async fn get_active_vault(
-    state: State<'_, ConfigState>,
-) -> AppResult<Option<VaultConfig>> {
-    let manager = state.manager.lock()
-        .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
-    Ok(manager.get_config().active_vault().cloned())
-}
 
 /// Update window configuration
 #[tauri::command]
@@ -142,11 +110,11 @@ pub async fn update_window_config(
 ) -> AppResult<String> {
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     let config = manager.get_config_mut();
     config.window = window_config;
     manager.save_config()?;
-    
+
     Ok("Window configuration updated successfully".to_string())
 }
 
@@ -158,11 +126,11 @@ pub async fn update_preferences(
 ) -> AppResult<String> {
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     let config = manager.get_config_mut();
     config.preferences = preferences;
     manager.save_config()?;
-    
+
     Ok("Preferences updated successfully".to_string())
 }
 
@@ -173,7 +141,7 @@ pub async fn backup_config(
 ) -> AppResult<String> {
     let manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     let backup_path = manager.backup_config()?;
     Ok(format!("Configuration backed up to: {}", backup_path.to_string_lossy()))
 }
@@ -185,7 +153,7 @@ pub async fn restore_config_from_backup(
 ) -> AppResult<String> {
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     manager.restore_from_backup()?;
     Ok("Configuration restored from backup successfully".to_string())
 }
@@ -197,7 +165,7 @@ pub async fn reset_config_to_defaults(
 ) -> AppResult<String> {
     let mut manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     manager.reset_to_defaults()?;
     Ok("Configuration reset to defaults successfully".to_string())
 }
@@ -209,10 +177,10 @@ pub async fn validate_config(
 ) -> AppResult<String> {
     let manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     manager.get_config().validate()
         .map_err(|e| AppError::InternalError(e))?;
-    
+
     Ok("Configuration is valid".to_string())
 }
 
@@ -224,7 +192,7 @@ pub async fn ensure_directories(
 ) -> AppResult<String> {
     let manager = state.manager.lock()
         .map_err(|e| AppError::InternalError(format!("Failed to lock config manager: {}", e)))?;
-    
+
     manager.ensure_directories(&app_handle)?;
     Ok("All required directories created successfully".to_string())
 }
