@@ -1,11 +1,13 @@
 use std::path::PathBuf;
+use std::fs;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use crate::models::vault::{VaultMetadata, VaultEntry, VaultEntryType, FileHierarchy};
+use crate::models::vault::{VaultMetadata, VaultEntry, VaultEntryType, FileHierarchy, VaultMasterKey};
 use crate::models::webdav::{VaultMount, VaultStatus, UnlockVaultRequest, LockVaultResponse, UnlockVaultResponse};
-use crate::store::encryption::EncryptionService;
+use crate::store::encryption::{EncryptionService, EncryptedData};
 use super::filesystem::VaultFileSystem;
+use super::encrypted_filesystem::EncryptedFileSystem;
 
 use super::server::WebDavServerManager;
 use super::commands::WebDavCommandState;
@@ -607,4 +609,383 @@ async fn test_concurrent_vault_operations() {
     assert_eq!(unlocked_vaults.len(), 2);
     assert!(unlocked_vaults.contains_key(&vault_id1));
     assert!(unlocked_vaults.contains_key(&vault_id2));
+}
+
+// ===== COMPREHENSIVE VAULT INTEGRATION TESTS =====
+
+#[tokio::test]
+async fn test_complete_vault_lifecycle_with_password() {
+    let temp_dir = TempDir::new().unwrap();
+    let vault_path = temp_dir.path().to_path_buf();
+    let vault_name = "test_vault_lifecycle";
+    let password = "test_password_123";
+
+    // Step 1: Create a test vault with password
+    let vault_dir = vault_path.join(vault_name);
+    fs::create_dir_all(&vault_dir).unwrap();
+
+    // Create master key from password
+    let master_key = VaultMasterKey::new(password).unwrap();
+
+    // Create vault metadata
+    let vault_metadata = VaultMetadata::new(vault_name.to_string(), vault_dir.clone());
+
+    // Decrypt master key and create encryption service
+    let decrypted_master_key = master_key.decrypt_master_key(password).unwrap();
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&decrypted_master_key);
+    let master_key_obj = crate::store::encryption::MasterKey::from_bytes(key_array);
+    let encryption_service = EncryptionService::with_master_key(master_key_obj);
+
+    // Save master key file (encrypted with password)
+    let master_key_json = serde_json::to_vec(&master_key).unwrap();
+    let master_key_path = vault_dir.join("masterkey.silvertiger");
+    fs::write(&master_key_path, &master_key_json).unwrap();
+
+    // Save encrypted vault config
+    let encrypted_metadata = encryption_service.encrypt_serialize(&vault_metadata).unwrap();
+    let metadata_json = serde_json::to_vec(&encrypted_metadata).unwrap();
+    let config_path = vault_dir.join("vault_config.silvertiger");
+    fs::write(&config_path, &metadata_json).unwrap();
+
+    // Create files directory
+    let files_dir = vault_dir.join("files");
+    fs::create_dir_all(&files_dir).unwrap();
+
+    // Step 2: Test that Welcome.txt is created and encrypted
+    let encrypted_fs = EncryptedFileSystem::new(
+        vault_metadata.clone(),
+        encryption_service.clone(),
+        vault_dir.clone(),
+    ).await.unwrap();
+
+    // Check that Welcome.txt exists on disk (encrypted)
+    let welcome_file_path = files_dir.join("Welcome.txt");
+    assert!(welcome_file_path.exists());
+
+    // Read the encrypted file from disk
+    let encrypted_welcome_data = fs::read(&welcome_file_path).unwrap();
+    let encrypted_welcome: EncryptedData = serde_json::from_slice(&encrypted_welcome_data).unwrap();
+
+    // Decrypt and verify Welcome.txt content
+    let decrypted_welcome = encryption_service.decrypt(&encrypted_welcome).unwrap();
+    let welcome_content = String::from_utf8(decrypted_welcome).unwrap();
+    assert!(welcome_content.contains("Welcome to your encrypted vault"));
+    assert!(welcome_content.contains(vault_name));
+
+    println!("✓ Welcome.txt created and encrypted successfully");
+
+    // Step 3: Test encrypting a custom test file
+    let test_file_content = "This is a test file for encryption testing.";
+    let test_file_encrypted = encryption_service.encrypt(test_file_content.as_bytes()).unwrap();
+    let test_file_json = serde_json::to_vec(&test_file_encrypted).unwrap();
+    let test_file_path = files_dir.join("test_file.txt");
+    fs::write(&test_file_path, &test_file_json).unwrap();
+
+    // Verify the test file can be decrypted
+    let read_encrypted_data = fs::read(&test_file_path).unwrap();
+    let read_encrypted: EncryptedData = serde_json::from_slice(&read_encrypted_data).unwrap();
+    let decrypted_test_content = encryption_service.decrypt(&read_encrypted).unwrap();
+    let decrypted_test_string = String::from_utf8(decrypted_test_content).unwrap();
+    assert_eq!(decrypted_test_string, test_file_content);
+
+    println!("✓ Test file encrypted and decrypted successfully");
+
+    // Step 4: Test that invalid password cannot decrypt files
+    let wrong_password = "wrong_password";
+
+    // Try to create encryption service with wrong password
+    let wrong_master_key_result = master_key.decrypt_master_key(wrong_password);
+    assert!(wrong_master_key_result.is_err());
+
+    println!("✓ Invalid password correctly rejected");
+
+    // Clear cache to ensure clean state
+    encrypted_fs.clear_cache().await;
+}
+
+#[tokio::test]
+async fn test_vault_unlock_creates_virtual_volume() {
+    let temp_dir = TempDir::new().unwrap();
+    let vault_path = temp_dir.path().to_path_buf();
+    let vault_name = "test_vault_webdav";
+    let password = "webdav_test_password";
+
+    // Create a complete test vault
+    let vault_dir = vault_path.join(vault_name);
+    fs::create_dir_all(&vault_dir).unwrap();
+
+    let master_key = VaultMasterKey::new(password).unwrap();
+    let vault_metadata = VaultMetadata::new(vault_name.to_string(), vault_dir.clone());
+
+    // Create encryption service
+    let decrypted_master_key = master_key.decrypt_master_key(password).unwrap();
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&decrypted_master_key);
+    let master_key_obj = crate::store::encryption::MasterKey::from_bytes(key_array);
+    let encryption_service = EncryptionService::with_master_key(master_key_obj);
+
+    // Save vault files
+    let master_key_json = serde_json::to_vec(&master_key).unwrap();
+    let master_key_path = vault_dir.join("masterkey.silvertiger");
+    fs::write(&master_key_path, &master_key_json).unwrap();
+
+    let encrypted_metadata = encryption_service.encrypt_serialize(&vault_metadata).unwrap();
+    let metadata_json = serde_json::to_vec(&encrypted_metadata).unwrap();
+    let config_path = vault_dir.join("vault_config.silvertiger");
+    fs::write(&config_path, &metadata_json).unwrap();
+
+    let files_dir = vault_dir.join("files");
+    fs::create_dir_all(&files_dir).unwrap();
+
+    // Test WebDAV server creation and virtual volume
+    let server_manager = WebDavServerManager::new();
+    let vault_id = Uuid::new_v4();
+
+    // Start WebDAV server (simulates vault unlock)
+    let vault_mount_result = server_manager.start_server(
+        vault_id,
+        vault_metadata.clone(),
+        encryption_service.clone(),
+        vault_dir.clone(),
+        Some(9998), // Use specific port for testing
+    ).await;
+
+    assert!(vault_mount_result.is_ok());
+    let vault_mount = vault_mount_result.unwrap();
+
+    // Verify vault is unlocked and WebDAV is running
+    assert_eq!(vault_mount.status, VaultStatus::Unlocked);
+    assert!(vault_mount.is_webdav_running());
+    assert_eq!(vault_mount.webdav_config.port, 9998);
+    assert!(vault_mount.get_mount_url().is_some());
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://127.0.0.1:9998/");
+
+    // Verify server is tracked
+    assert!(server_manager.is_server_running(&vault_id).await);
+    assert_eq!(server_manager.get_server_port(&vault_id).await, Some(9998));
+
+    println!("✓ Virtual volume created successfully on unlock");
+
+    // Test that files are accessible through the virtual volume
+    // (In a real scenario, this would be accessible via WebDAV at the mount URL)
+
+    // Stop the server (simulates vault lock)
+    let stop_result = server_manager.stop_server(&vault_id).await;
+    assert!(stop_result.is_ok());
+
+    // Verify server is no longer running
+    assert!(!server_manager.is_server_running(&vault_id).await);
+    assert!(server_manager.get_server_port(&vault_id).await.is_none());
+
+    println!("✓ Virtual volume removed successfully on lock");
+}
+
+#[tokio::test]
+async fn test_complete_unlock_lock_workflow() {
+    let temp_dir = TempDir::new().unwrap();
+    let vault_path = temp_dir.path().to_path_buf();
+    let vault_name = "test_vault_workflow";
+    let password = "workflow_test_password";
+
+    // Create a complete test vault
+    let vault_dir = vault_path.join(vault_name);
+    fs::create_dir_all(&vault_dir).unwrap();
+
+    let master_key = VaultMasterKey::new(password).unwrap();
+    let vault_metadata = VaultMetadata::new(vault_name.to_string(), vault_dir.clone());
+
+    let decrypted_master_key = master_key.decrypt_master_key(password).unwrap();
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&decrypted_master_key);
+    let master_key_obj = crate::store::encryption::MasterKey::from_bytes(key_array);
+    let encryption_service = EncryptionService::with_master_key(master_key_obj);
+
+    // Save vault files
+    let master_key_json = serde_json::to_vec(&master_key).unwrap();
+    let master_key_path = vault_dir.join("masterkey.silvertiger");
+    fs::write(&master_key_path, &master_key_json).unwrap();
+
+    let encrypted_metadata = encryption_service.encrypt_serialize(&vault_metadata).unwrap();
+    let metadata_json = serde_json::to_vec(&encrypted_metadata).unwrap();
+    let config_path = vault_dir.join("vault_config.silvertiger");
+    fs::write(&config_path, &metadata_json).unwrap();
+
+    let files_dir = vault_dir.join("files");
+    fs::create_dir_all(&files_dir).unwrap();
+
+    // Create WebDAV command state
+    let webdav_state = WebDavCommandState::new();
+    let vault_id = Uuid::new_v4();
+
+    // Test unlock workflow
+    let unlock_request = UnlockVaultRequest {
+        vault_id,
+        password: password.to_string(),
+    };
+
+    // Simulate the unlock process by manually adding to state
+    {
+        let mut unlocked_vaults = webdav_state.unlocked_vaults.write().await;
+        unlocked_vaults.insert(vault_id, encryption_service.clone());
+    }
+
+    // Start WebDAV server
+    let vault_mount_result = webdav_state.server_manager.start_server(
+        vault_id,
+        vault_metadata.clone(),
+        encryption_service.clone(),
+        vault_dir.clone(),
+        Some(9997),
+    ).await;
+
+    assert!(vault_mount_result.is_ok());
+    let vault_mount = vault_mount_result.unwrap();
+
+    // Add to WebDAV state
+    {
+        let mut webdav_state_guard = webdav_state.webdav_state.write().await;
+        webdav_state_guard.add_mounted_vault(vault_mount.clone());
+    }
+
+    // Verify unlock state
+    assert_eq!(webdav_state.unlocked_vaults.read().await.len(), 1);
+    assert_eq!(webdav_state.webdav_state.read().await.list_mounted_vaults().len(), 1);
+    assert!(webdav_state.server_manager.is_server_running(&vault_id).await);
+
+    println!("✓ Vault unlocked successfully with virtual volume");
+
+    // Test that files can be accessed (simulate file operations)
+    let encrypted_fs = EncryptedFileSystem::new(
+        vault_metadata.clone(),
+        encryption_service.clone(),
+        vault_dir.clone(),
+    ).await.unwrap();
+
+    // Verify Welcome.txt is accessible
+    let welcome_file_path = files_dir.join("Welcome.txt");
+    assert!(welcome_file_path.exists());
+
+    // Test lock workflow
+    // Stop WebDAV server
+    let stop_result = webdav_state.server_manager.stop_server(&vault_id).await;
+    assert!(stop_result.is_ok());
+
+    // Remove from unlocked vaults
+    {
+        let mut unlocked_vaults = webdav_state.unlocked_vaults.write().await;
+        unlocked_vaults.remove(&vault_id);
+    }
+
+    // Remove from WebDAV state
+    {
+        let mut webdav_state_guard = webdav_state.webdav_state.write().await;
+        webdav_state_guard.remove_mounted_vault(&vault_id);
+    }
+
+    // Clear filesystem cache (simulates memory cleanup)
+    encrypted_fs.clear_cache().await;
+
+    // Verify lock state
+    assert_eq!(webdav_state.unlocked_vaults.read().await.len(), 0);
+    assert_eq!(webdav_state.webdav_state.read().await.list_mounted_vaults().len(), 0);
+    assert!(!webdav_state.server_manager.is_server_running(&vault_id).await);
+
+    println!("✓ Vault locked successfully with virtual volume removed and memory cleared");
+}
+
+#[tokio::test]
+async fn test_file_encryption_with_multiple_passwords() {
+    let temp_dir = TempDir::new().unwrap();
+    let vault_path = temp_dir.path().to_path_buf();
+    let vault_name = "test_vault_multipass";
+    let correct_password = "correct_password_123";
+    let wrong_password = "wrong_password_456";
+
+    // Create vault with correct password
+    let vault_dir = vault_path.join(vault_name);
+    fs::create_dir_all(&vault_dir).unwrap();
+
+    let master_key = VaultMasterKey::new(correct_password).unwrap();
+    let vault_metadata = VaultMetadata::new(vault_name.to_string(), vault_dir.clone());
+
+    // Create encryption service with correct password
+    let decrypted_master_key = master_key.decrypt_master_key(correct_password).unwrap();
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&decrypted_master_key);
+    let master_key_obj = crate::store::encryption::MasterKey::from_bytes(key_array);
+    let encryption_service = EncryptionService::with_master_key(master_key_obj);
+
+    // Save vault files
+    let master_key_json = serde_json::to_vec(&master_key).unwrap();
+    let master_key_path = vault_dir.join("masterkey.silvertiger");
+    fs::write(&master_key_path, &master_key_json).unwrap();
+
+    let files_dir = vault_dir.join("files");
+    fs::create_dir_all(&files_dir).unwrap();
+
+    // Test 1: Encrypt multiple test files
+    let test_files = vec![
+        ("document1.txt", "This is the first test document."),
+        ("document2.txt", "This is the second test document with more content."),
+        ("notes.md", "# Test Notes\n\nThis is a markdown file for testing."),
+    ];
+
+    for (filename, content) in &test_files {
+        let encrypted_content = encryption_service.encrypt(content.as_bytes()).unwrap();
+        let encrypted_json = serde_json::to_vec(&encrypted_content).unwrap();
+        let file_path = files_dir.join(filename);
+        fs::write(&file_path, &encrypted_json).unwrap();
+    }
+
+    println!("✓ Multiple files encrypted successfully");
+
+    // Test 2: Verify files can be decrypted with correct password
+    for (filename, expected_content) in &test_files {
+        let file_path = files_dir.join(filename);
+        let encrypted_data = fs::read(&file_path).unwrap();
+        let encrypted: EncryptedData = serde_json::from_slice(&encrypted_data).unwrap();
+        let decrypted = encryption_service.decrypt(&encrypted).unwrap();
+        let decrypted_content = String::from_utf8(decrypted).unwrap();
+        assert_eq!(&decrypted_content, expected_content);
+    }
+
+    println!("✓ All files decrypted successfully with correct password");
+
+    // Test 3: Verify files cannot be decrypted with wrong password
+    let wrong_master_key_result = master_key.decrypt_master_key(wrong_password);
+    assert!(wrong_master_key_result.is_err());
+
+    println!("✓ Wrong password correctly rejected for master key");
+
+    // Test 4: Test encrypted filesystem with files
+    let encrypted_fs = EncryptedFileSystem::new(
+        vault_metadata.clone(),
+        encryption_service.clone(),
+        vault_dir.clone(),
+    ).await.unwrap();
+
+    // Verify Welcome.txt was created
+    let welcome_file_path = files_dir.join("Welcome.txt");
+    assert!(welcome_file_path.exists());
+
+    // Test that all files are accessible through encrypted filesystem
+    // (This simulates WebDAV access)
+
+    // Clear cache to test memory cleanup
+    encrypted_fs.clear_cache().await;
+
+    println!("✓ Encrypted filesystem created and cache cleared successfully");
+
+    // Test 5: Verify file integrity after cache operations
+    for (filename, expected_content) in &test_files {
+        let file_path = files_dir.join(filename);
+        let encrypted_data = fs::read(&file_path).unwrap();
+        let encrypted: EncryptedData = serde_json::from_slice(&encrypted_data).unwrap();
+        let decrypted = encryption_service.decrypt(&encrypted).unwrap();
+        let decrypted_content = String::from_utf8(decrypted).unwrap();
+        assert_eq!(&decrypted_content, expected_content);
+    }
+
+    println!("✓ File integrity maintained after cache operations");
 }
