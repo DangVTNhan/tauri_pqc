@@ -60,13 +60,13 @@ impl WebDavServerManager {
         };
 
         // Create filesystem adapter
-        let filesystem = VaultFileSystem::new(vault_metadata.clone(), encryption_service, vault_path.clone())
+        let filesystem = VaultFileSystem::new(vault_metadata.clone(), encryption_service, vault_path.clone()).await
             .map_err(|e| format!("Failed to create filesystem: {}", e))?;
 
-        // Create DAV handler using LocalFs for now
-        let local_fs = filesystem.into_local_fs();
+        // Create DAV handler using the encrypted filesystem
+        let encrypted_fs = filesystem.into_encrypted_fs();
         let dav_handler = DavHandler::builder()
-            .filesystem(Box::new(local_fs))
+            .filesystem(Box::new(encrypted_fs))
             .locksystem(FakeLs::new())
             .build_handler();
 

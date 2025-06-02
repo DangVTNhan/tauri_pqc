@@ -64,7 +64,7 @@ impl EncryptedData {
 }
 
 /// Master key for encryption operations
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MasterKey {
     key: Secret<[u8; AES_KEY_SIZE]>,
 }
@@ -134,7 +134,7 @@ impl Drop for MasterKey {
 }
 
 /// Encryption service for secure data storage
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EncryptionService {
     master_key: MasterKey,
     config: EncryptionConfig,

@@ -4711,6 +4711,7 @@ dependencies = [
  "chrono",
  "dav-server",
  "dirs 5.0.1",
+ "futures-util",
  "http",
  "http-body-util",
  "hyper",

@@ -6,6 +6,7 @@ use crate::models::vault::{VaultMetadata, VaultEntry, VaultEntryType, FileHierar
 use crate::models::webdav::{VaultMount, VaultStatus, UnlockVaultRequest, LockVaultResponse, UnlockVaultResponse};
 use crate::store::encryption::EncryptionService;
 use super::filesystem::VaultFileSystem;
+
 use super::server::WebDavServerManager;
 use super::commands::WebDavCommandState;
 
@@ -29,7 +30,7 @@ async fn test_vault_filesystem_creation() {
         vault_metadata,
         encryption_service,
         vault_path,
-    );
+    ).await;
 
     // Test that filesystem was created successfully
     // This is a basic test to ensure the struct can be instantiated
@@ -145,6 +146,38 @@ fn test_vault_entry_hierarchy() {
     assert_eq!(file_hierarchy.root_entries.len(), 1);
     assert_eq!(file_hierarchy.total_directories, 1);
     assert_eq!(file_hierarchy.total_files, 0);
+}
+
+#[tokio::test]
+async fn test_encrypted_filesystem_creation() {
+    let temp_dir = TempDir::new().unwrap();
+    let vault_path = temp_dir.path().to_path_buf();
+
+    // Create test vault metadata
+    let vault_metadata = VaultMetadata::new(
+        "test_encrypted_vault".to_string(),
+        vault_path.clone(),
+    );
+
+    // Create encryption service
+    let master_key = crate::store::encryption::MasterKey::generate();
+    let encryption_service = EncryptionService::with_master_key(master_key);
+
+    // Create encrypted filesystem
+    let encrypted_fs = super::encrypted_filesystem::EncryptedFileSystem::new(
+        vault_metadata,
+        encryption_service,
+        vault_path,
+    ).await;
+
+    // Test that filesystem was created successfully
+    assert!(encrypted_fs.is_ok());
+
+    // Test cache clearing
+    if let Ok(fs) = encrypted_fs {
+        fs.clear_cache().await;
+        // Should not panic or error
+    }
 }
 
 #[test]
