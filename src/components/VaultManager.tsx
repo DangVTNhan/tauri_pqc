@@ -117,7 +117,10 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
 
           // Automatically open Finder to show the vault content
           try {
-            await invoke('open_url', { url: response.vault_mount.mount_url });
+            await invoke('open_url', {
+              url: response.vault_mount.mount_url,
+              vaultName: selectedVault.name
+            });
             toast.success(`Vault "${selectedVault.name}" unlocked and opened in Finder`);
           } catch (openError) {
             console.error('Failed to open Finder:', openError);
@@ -203,9 +206,12 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
     }
   };
 
-  const openInFinder = async (mountUrl: string) => {
+  const openInFinder = async (mountUrl: string, vaultName?: string) => {
     try {
-      await invoke('open_url', { url: mountUrl });
+      await invoke('open_url', {
+        url: mountUrl,
+        vaultName: vaultName
+      });
     } catch (error) {
       console.error('Failed to open in Finder:', error);
       toast.error('Failed to open in Finder');
@@ -484,7 +490,7 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => openInFinder(vaultMountUrls[vault.id])}
+                            onClick={() => openInFinder(vaultMountUrls[vault.id], vault.name)}
                             className="h-6 px-2"
                             title="Open in Finder"
                           >

@@ -20,7 +20,7 @@ pub struct WebDavConfig {
 impl Default for WebDavConfig {
     fn default() -> Self {
         Self {
-            host: "127.0.0.1".to_string(),
+            host: "localhost".to_string(), // Default placeholder, will be replaced with vault name
             port: 8080,
             is_running: false,
             started_at: None,

@@ -166,12 +166,12 @@ impl WebDavServerManager {
         );
         vault_mount.status = VaultStatus::Unlocked;
         vault_mount.webdav_config = WebDavConfig {
-            host: "127.0.0.1".to_string(),
+            host: vault_metadata.name.clone(),
             port,
             is_running: true,
             started_at: Some(chrono::Utc::now()),
         };
-        vault_mount.mount_url = Some(format!("http://127.0.0.1:{}/", port));
+        vault_mount.mount_url = Some(format!("http://{}:{}/", vault_metadata.name, port));
 
         // Store server instance
         {

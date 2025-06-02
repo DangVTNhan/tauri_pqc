@@ -86,10 +86,11 @@ async fn test_vault_mount_status_transitions() {
     vault_mount.status = VaultStatus::Unlocked;
     vault_mount.webdav_config.is_running = true;
     vault_mount.webdav_config.port = 8080;
+    vault_mount.webdav_config.host = "TestVault".to_string();
     assert!(vault_mount.is_unlocked());
     assert!(vault_mount.is_webdav_running());
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://127.0.0.1:8080/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://TestVault:8080/");
 
     // Test unlocked state without WebDAV running
     vault_mount.webdav_config.is_running = false;
@@ -428,12 +429,13 @@ async fn test_vault_mount_url_generation() {
     // Test unlocked vault with WebDAV running (has URL)
     vault_mount.webdav_config.is_running = true;
     vault_mount.webdav_config.port = 8080;
+    vault_mount.webdav_config.host = "TestVault".to_string();
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://127.0.0.1:8080/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://TestVault:8080/");
 
     // Test different port
     vault_mount.webdav_config.port = 9000;
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://127.0.0.1:9000/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://TestVault:9000/");
 }
 
 #[tokio::test]
@@ -467,20 +469,20 @@ fn test_webdav_config_creation() {
     use crate::models::webdav::WebDavConfig;
 
     let config = WebDavConfig {
-        host: "127.0.0.1".to_string(),
+        host: "TestVault".to_string(),
         port: 8080,
         is_running: false,
         started_at: None,
     };
 
-    assert_eq!(config.host, "127.0.0.1");
+    assert_eq!(config.host, "TestVault");
     assert_eq!(config.port, 8080);
     assert!(!config.is_running);
     assert!(config.started_at.is_none());
 
     // Test with started_at
     let config_with_start = WebDavConfig {
-        host: "127.0.0.1".to_string(),
+        host: "TestVault".to_string(),
         port: 8080,
         is_running: true,
         started_at: Some(chrono::Utc::now()),
@@ -759,7 +761,7 @@ async fn test_vault_unlock_creates_virtual_volume() {
     assert!(vault_mount.is_webdav_running());
     assert_eq!(vault_mount.webdav_config.port, 9998);
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://127.0.0.1:9998/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://test_vault_webdav:9998/");
 
     // Verify server is tracked
     assert!(server_manager.is_server_running(&vault_id).await);
