@@ -25,7 +25,7 @@ impl Default for WebDavConfig {
     fn default() -> Self {
         Self {
             host: "localhost".to_string(), // Use localhost for better compatibility
-            port: 8080, // Fixed port for all vaults
+            port: 6969, // Fixed port for all vaults
             is_running: false,
             started_at: None,
             username: None,
@@ -154,7 +154,7 @@ impl WebDavState {
     pub fn new() -> Self {
         Self {
             mounted_vaults: HashMap::new(),
-            next_port: 8080,
+            next_port: 6969,
         }
     }
 

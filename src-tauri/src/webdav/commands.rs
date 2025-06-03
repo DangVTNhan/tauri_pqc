@@ -135,6 +135,8 @@ pub async fn unlock_vault(
             // Mount the WebDAV volume using the new Cryptomator-style approach
             if let Some(mount_url) = &vault_mount.mount_url {
                 if let (Some(username), Some(password)) = (&vault_mount.webdav_config.username, &vault_mount.webdav_config.password) {
+                    println!("⏱️  Waiting briefly for WebDAV server to be fully ready...");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     println!("Attempting to mount WebDAV volume for vault: {}", vault_mount.vault_name);
                     match crate::commands::mount_webdav_volume(
                         mount_url.clone(),

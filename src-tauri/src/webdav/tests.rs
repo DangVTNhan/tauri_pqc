@@ -85,13 +85,13 @@ async fn test_vault_mount_status_transitions() {
     // Test unlocked state with WebDAV running
     vault_mount.status = VaultStatus::Unlocked;
     vault_mount.webdav_config.is_running = true;
-    vault_mount.webdav_config.port = 8080;
+    vault_mount.webdav_config.port = 6969;
     vault_mount.webdav_config.host = "localhost".to_string();
-    vault_mount.mount_url = Some("http://localhost:8080/TestVault/".to_string());
+    vault_mount.mount_url = Some("http://localhost:6969/TestVault/".to_string());
     assert!(vault_mount.is_unlocked());
     assert!(vault_mount.is_webdav_running());
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:8080/TestVault/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:6969/TestVault/");
 
     // Test unlocked state without WebDAV running
     vault_mount.webdav_config.is_running = false;
@@ -206,15 +206,15 @@ async fn test_webdav_state_management() {
 
     // Test initial state
     assert_eq!(webdav_state.list_mounted_vaults().len(), 0);
-    assert_eq!(webdav_state.next_port, 8080);
+    assert_eq!(webdav_state.next_port, 6969);
 
     // Test port allocation
     let port1 = webdav_state.get_next_port();
     let port2 = webdav_state.get_next_port();
 
-    assert_eq!(port1, 8080);
-    assert_eq!(port2, 8081);
-    assert_eq!(webdav_state.next_port, 8082);
+    assert_eq!(port1, 6969);
+    assert_eq!(port2, 6970);
+    assert_eq!(webdav_state.next_port, 6971);
 
     // Test vault mount management
     let vault_id = Uuid::new_v4();
@@ -429,15 +429,15 @@ async fn test_vault_mount_url_generation() {
 
     // Test unlocked vault with WebDAV running (has URL)
     vault_mount.webdav_config.is_running = true;
-    vault_mount.webdav_config.port = 8080;
+    vault_mount.webdav_config.port = 6969;
     vault_mount.webdav_config.host = "localhost".to_string();
-    vault_mount.mount_url = Some("http://localhost:8080/TestVault/".to_string());
+    vault_mount.mount_url = Some("http://localhost:6969/TestVault/".to_string());
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:8080/TestVault/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:6969/TestVault/");
 
     // Test different vault name in URL
-    vault_mount.mount_url = Some("http://localhost:8080/AnotherVault/".to_string());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:8080/AnotherVault/");
+    vault_mount.mount_url = Some("http://localhost:6969/AnotherVault/".to_string());
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:6969/AnotherVault/");
 }
 
 #[tokio::test]
@@ -472,7 +472,7 @@ fn test_webdav_config_creation() {
 
     let config = WebDavConfig {
         host: "localhost".to_string(),
-        port: 8080,
+        port: 6969,
         is_running: false,
         started_at: None,
         username: Some("testuser".to_string()),
@@ -480,14 +480,14 @@ fn test_webdav_config_creation() {
     };
 
     assert_eq!(config.host, "localhost");
-    assert_eq!(config.port, 8080);
+    assert_eq!(config.port, 6969);
     assert!(!config.is_running);
     assert!(config.started_at.is_none());
 
     // Test with started_at
     let config_with_start = WebDavConfig {
         host: "localhost".to_string(),
-        port: 8080,
+        port: 6969,
         is_running: true,
         started_at: Some(chrono::Utc::now()),
         username: Some("testuser2".to_string()),

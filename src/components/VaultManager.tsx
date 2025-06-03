@@ -95,6 +95,9 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
     setIsUnlocking(true);
     setPasswordError('');
 
+    console.log("password: " + password);
+    console.log("select vault id" + selectedVault.id);
+
     try {
       const response = await invoke<{
         success: boolean;

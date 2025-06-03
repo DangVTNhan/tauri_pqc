@@ -34,6 +34,7 @@ pub fn run() {
             commands::greet_multi_param,
             commands::mount_webdav_volume,
             commands::unmount_webdav_volume,
+            commands::open_url,
             commands::encrypt_data,
             commands::decrypt_data,
             commands::generate_key_bundle,
