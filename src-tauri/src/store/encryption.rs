@@ -233,6 +233,11 @@ impl EncryptionService {
     pub fn config(&self) -> &EncryptionConfig {
         &self.config
     }
+
+    /// Get the master key (use with caution)
+    pub fn master_key(&self) -> &MasterKey {
+        &self.master_key
+    }
 }
 
 impl Default for EncryptionService {

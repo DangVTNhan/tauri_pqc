@@ -132,6 +132,29 @@ pub async fn unlock_vault(
                 webdav_state.add_mounted_vault(vault_mount.clone());
             }
 
+            // Mount the WebDAV volume using the new Cryptomator-style approach
+            if let Some(mount_url) = &vault_mount.mount_url {
+                if let (Some(username), Some(password)) = (&vault_mount.webdav_config.username, &vault_mount.webdav_config.password) {
+                    println!("Attempting to mount WebDAV volume for vault: {}", vault_mount.vault_name);
+                    match crate::commands::mount_webdav_volume(
+                        mount_url.clone(),
+                        vault_mount.vault_name.clone(),
+                        username.clone(),
+                        password.clone()
+                    ).await {
+                        Ok(()) => {
+                            println!("Successfully mounted WebDAV volume for vault: {}", vault_mount.vault_name);
+                        }
+                        Err(e) => {
+                            println!("Warning: Failed to mount WebDAV volume for vault {}: {}", vault_mount.vault_name, e);
+                            // Don't fail the unlock process if mounting fails
+                        }
+                    }
+                } else {
+                    println!("Warning: No authentication credentials available for mounting vault: {}", vault_mount.vault_name);
+                }
+            }
+
             Ok(UnlockVaultResponse {
                 success: true,
                 vault_mount: Some(vault_mount),

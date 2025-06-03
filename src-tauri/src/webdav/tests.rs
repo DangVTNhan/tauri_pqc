@@ -86,11 +86,12 @@ async fn test_vault_mount_status_transitions() {
     vault_mount.status = VaultStatus::Unlocked;
     vault_mount.webdav_config.is_running = true;
     vault_mount.webdav_config.port = 8080;
-    vault_mount.webdav_config.host = "TestVault".to_string();
+    vault_mount.webdav_config.host = "localhost".to_string();
+    vault_mount.mount_url = Some("http://localhost:8080/TestVault/".to_string());
     assert!(vault_mount.is_unlocked());
     assert!(vault_mount.is_webdav_running());
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://TestVault:8080/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:8080/TestVault/");
 
     // Test unlocked state without WebDAV running
     vault_mount.webdav_config.is_running = false;
@@ -347,7 +348,7 @@ async fn test_webdav_server_lifecycle() {
     assert_eq!(vault_mount.vault_id, vault_id);
     assert_eq!(vault_mount.status, VaultStatus::Unlocked);
     assert!(vault_mount.is_webdav_running());
-    assert_eq!(vault_mount.webdav_config.port, 9999);
+    assert_eq!(vault_mount.webdav_config.port, 9999); // Custom port should override default
 
     // Test server is now running
     assert!(manager.is_server_running(&vault_id).await);
@@ -429,13 +430,14 @@ async fn test_vault_mount_url_generation() {
     // Test unlocked vault with WebDAV running (has URL)
     vault_mount.webdav_config.is_running = true;
     vault_mount.webdav_config.port = 8080;
-    vault_mount.webdav_config.host = "TestVault".to_string();
+    vault_mount.webdav_config.host = "localhost".to_string();
+    vault_mount.mount_url = Some("http://localhost:8080/TestVault/".to_string());
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://TestVault:8080/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:8080/TestVault/");
 
-    // Test different port
-    vault_mount.webdav_config.port = 9000;
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://TestVault:9000/");
+    // Test different vault name in URL
+    vault_mount.mount_url = Some("http://localhost:8080/AnotherVault/".to_string());
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://localhost:8080/AnotherVault/");
 }
 
 #[tokio::test]
@@ -469,23 +471,27 @@ fn test_webdav_config_creation() {
     use crate::models::webdav::WebDavConfig;
 
     let config = WebDavConfig {
-        host: "TestVault".to_string(),
+        host: "localhost".to_string(),
         port: 8080,
         is_running: false,
         started_at: None,
+        username: Some("testuser".to_string()),
+        password: Some("testpass".to_string()),
     };
 
-    assert_eq!(config.host, "TestVault");
+    assert_eq!(config.host, "localhost");
     assert_eq!(config.port, 8080);
     assert!(!config.is_running);
     assert!(config.started_at.is_none());
 
     // Test with started_at
     let config_with_start = WebDavConfig {
-        host: "TestVault".to_string(),
+        host: "localhost".to_string(),
         port: 8080,
         is_running: true,
         started_at: Some(chrono::Utc::now()),
+        username: Some("testuser2".to_string()),
+        password: Some("testpass2".to_string()),
     };
 
     assert!(config_with_start.is_running);
@@ -759,9 +765,13 @@ async fn test_vault_unlock_creates_virtual_volume() {
     // Verify vault is unlocked and WebDAV is running
     assert_eq!(vault_mount.status, VaultStatus::Unlocked);
     assert!(vault_mount.is_webdav_running());
-    assert_eq!(vault_mount.webdav_config.port, 9998);
+    assert_eq!(vault_mount.webdav_config.port, 9998); // Custom port should override default
     assert!(vault_mount.get_mount_url().is_some());
-    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://test_vault_webdav:9998/");
+    assert_eq!(vault_mount.get_mount_url().unwrap(), "http://127.0.0.1:9998/test_vault_webdav/");
+
+    // Verify authentication credentials are set to defaults
+    assert_eq!(vault_mount.webdav_config.username, Some("vault_user".to_string()));
+    assert_eq!(vault_mount.webdav_config.password, Some("vault_pass".to_string()));
 
     // Verify server is tracked
     assert!(server_manager.is_server_running(&vault_id).await);
