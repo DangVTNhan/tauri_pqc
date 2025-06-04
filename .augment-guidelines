@@ -2,3 +2,4 @@ All file, folder encryption should happend on the Rust tauri backend
 This system should has high security standard and high performance
 We dont need to write test on the fontend but we want high test coverage for the Rust backend function
 Only one README.md in the root directory be be kept don't create too many README.
+This is end to end encryption project so there must be NO decryption key stored on the server (Go backend). The main purpose of Go backend is only for storing encrypted content, public key bundle, metadata, and message queue act as an inbox for wrapped keys.

@@ -39,6 +39,16 @@ export interface UserRegistrationRequest {
   key_bundle: KeyBundle;
 }
 
+export interface UserLoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface UserLoginResponse {
+  user: User;
+  groups: Group[];
+}
+
 export interface Group {
   id: string;
   name: string;
@@ -96,6 +106,8 @@ export interface SharedFile {
   shared_at: string; // ISO string
   group_id: string;
   status: FileStatus;
+  blob_url: string; // URL to encrypted blob storage
+  blob_hash: string; // SHA-256 hash of encrypted blob
   description?: string;
 }
 
@@ -135,7 +147,7 @@ export interface UserSession {
 export interface FileUploadProgress {
   file_name: string;
   progress: number; // 0-100
-  status: 'encrypting' | 'uploading' | 'complete' | 'error';
+  status: 'encrypting' | 'uploading' | 'uploading to blob storage' | 'sending wrapped keys' | 'sharing file metadata' | 'complete' | 'error';
   error?: string;
 }
 

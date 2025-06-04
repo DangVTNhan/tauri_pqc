@@ -10,6 +10,8 @@ import type {
     PublicKeyBundleResponse,
     SharedFile,
     User,
+    UserLoginRequest,
+    UserLoginResponse,
     UserRegistrationRequest,
     WrappedKey
 } from '@/types/e2ee';
@@ -74,6 +76,64 @@ class APIClient {
     });
   }
 
+  // User login
+  async loginUser(request: UserLoginRequest): Promise<APIResponse<UserLoginResponse>> {
+    return this.request('/login', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  // Get user by username
+  async getUserByUsername(username: string): Promise<APIResponse<User>> {
+    return this.request(`/users/by-username/${encodeURIComponent(username)}`);
+  }
+
+  // Upload encrypted blob to storage
+  async uploadBlob(encryptedContent: string): Promise<APIResponse<{
+    blob_id: string;
+    blob_url: string;
+    blob_hash: string;
+    size: number;
+  }>> {
+    // Calculate hash of the base64-decoded binary data
+    const binaryData = Uint8Array.from(atob(encryptedContent), c => c.charCodeAt(0));
+    const hashBuffer = await crypto.subtle.digest('SHA-256', binaryData);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    return this.request('/blobs/upload', {
+      method: 'POST',
+      body: JSON.stringify({
+        encrypted_content: encryptedContent,
+        blob_hash: hashHex,
+      }),
+    });
+  }
+
+  // Send bulk wrapped keys to multiple users
+  async sendBulkWrappedKeys(
+    fileId: string,
+    groupId: string,
+    wrappedKeys: Record<string, WrappedKey>
+  ): Promise<APIResponse<{
+    file_id: string;
+    group_id: string;
+    sent_messages: string[];
+    failed_recipients: string[];
+    total_sent: number;
+    total_failed: number;
+  }>> {
+    return this.request('/messages/send-bulk', {
+      method: 'POST',
+      body: JSON.stringify({
+        file_id: fileId,
+        group_id: groupId,
+        wrapped_keys: wrappedKeys,
+      }),
+    });
+  }
+
   // Group operations
   async createGroup(request: GroupCreateRequest): Promise<APIResponse<Group>> {
     return this.request('/groups', {
@@ -91,6 +151,22 @@ class APIClient {
 
   // File operations
   async shareFile(groupId: string, request: FileShareRequest): Promise<APIResponse<SharedFile>> {
+    return this.request(`/groups/${groupId}/files`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  // Share file metadata only (zero-knowledge)
+  async shareFileMetadata(groupId: string, request: {
+    original_name: string;
+    size: number;
+    mime_type: string;
+    shared_by: string;
+    blob_url: string;
+    blob_hash: string;
+    description?: string;
+  }): Promise<APIResponse<SharedFile>> {
     return this.request(`/groups/${groupId}/files`, {
       method: 'POST',
       body: JSON.stringify(request),
@@ -124,6 +200,37 @@ class APIClient {
   async getFileContent(fileId: string, userId: string): Promise<APIResponse<FileContentResponse>> {
     return this.request(`/files/${fileId}/content?user_id=${encodeURIComponent(userId)}`);
   }
+
+  // Get user's message queue
+  async getUserMessages(userId: string): Promise<APIResponse<{
+    user_id: string;
+    messages: any[];
+    count: number;
+  }>> {
+    return this.request(`/users/${userId}/messages`);
+  }
+
+  // Download encrypted blob from storage
+  async downloadBlob(blobUrl: string): Promise<APIResponse<{
+    blob_id: string;
+    encrypted_content: string;
+    blob_hash: string;
+    size: number;
+  }>> {
+    // Extract blob ID from URL (e.g., "/blobs/abc123" -> "abc123")
+    const blobId = blobUrl.split('/').pop();
+    return this.request(`/blobs/${blobId}`);
+  }
+
+  // Mark message as processed
+  async markMessageProcessed(messageId: string): Promise<APIResponse<{
+    message_id: string;
+    processed: boolean;
+  }>> {
+    return this.request(`/messages/${messageId}/processed`, {
+      method: 'PATCH',
+    });
+  }
 }
 
 export const apiClient = new APIClient();
@@ -150,6 +257,120 @@ export const api = {
 
     if (response.success && response.data) {
       return { success: true, user: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Login a user
+  async login(username: string, password: string): Promise<{ success: boolean; user?: User; groups?: Group[]; error?: string }> {
+    const response = await apiClient.loginUser({
+      username,
+      password,
+    });
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        user: response.data.user,
+        groups: response.data.groups
+      };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Get user by username
+  async getUserByUsername(username: string): Promise<{ success: boolean; user?: User; error?: string }> {
+    const response = await apiClient.getUserByUsername(username);
+
+    if (response.success && response.data) {
+      return { success: true, user: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Upload encrypted blob to storage
+  async uploadBlob(encryptedContent: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    const response = await apiClient.uploadBlob(encryptedContent);
+
+    if (response.success && response.data) {
+      return { success: true, data: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Send bulk wrapped keys to multiple users
+  async sendBulkWrappedKeys(
+    fileId: string,
+    groupId: string,
+    wrappedKeys: Record<string, WrappedKey>
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    const response = await apiClient.sendBulkWrappedKeys(fileId, groupId, wrappedKeys);
+
+    if (response.success && response.data) {
+      return { success: true, data: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Share file metadata only (zero-knowledge)
+  async shareFileMetadata(
+    groupId: string,
+    file: File,
+    blobUrl: string,
+    blobHash: string,
+    sharedBy: string
+  ): Promise<{ success: boolean; file?: SharedFile; error?: string }> {
+    const request = {
+      original_name: file.name,
+      size: file.size,
+      mime_type: file.type,
+      shared_by: sharedBy,
+      blob_url: blobUrl,
+      blob_hash: blobHash,
+    };
+
+    const response = await apiClient.shareFileMetadata(groupId, request);
+
+    if (response.success && response.data) {
+      return { success: true, file: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Get user's message queue
+  async getUserMessages(userId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    const response = await apiClient.getUserMessages(userId);
+
+    if (response.success && response.data) {
+      return { success: true, data: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Download encrypted blob from storage
+  async downloadBlob(blobUrl: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    const response = await apiClient.downloadBlob(blobUrl);
+
+    if (response.success && response.data) {
+      return { success: true, data: response.data };
+    }
+
+    return { success: false, error: response.error };
+  },
+
+  // Mark message as processed
+  async markMessageProcessed(messageId: string): Promise<{ success: boolean; error?: string }> {
+    const response = await apiClient.markMessageProcessed(messageId);
+
+    if (response.success) {
+      return { success: true };
     }
 
     return { success: false, error: response.error };

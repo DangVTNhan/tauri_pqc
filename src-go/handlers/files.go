@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -140,8 +139,8 @@ func (h *FileHandler) GetGroupFiles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetFileContent handles retrieving encrypted file content and wrapped master key for a user
-func (h *FileHandler) GetFileContent(w http.ResponseWriter, r *http.Request) {
+// GetFileInfo handles retrieving file metadata (zero-knowledge - no content or keys)
+func (h *FileHandler) GetFileInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		utils.WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -181,26 +180,21 @@ func (h *FileHandler) GetFileContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get wrapped master key for this user
-	wrappedKey, exists := file.GetWrappedMasterKey(userID)
-	if !exists {
-		utils.WriteNotFoundResponse(w, "No access key found for this user")
-		return
-	}
-
 	// Mark as downloaded by this user
 	file.MarkDownloadedBy(userID)
 	h.storage.UpdateFile(file)
 
-	// Return file content and wrapped key
+	// Return file metadata only (zero-knowledge: no encryption keys or content)
 	utils.WriteSuccessResponse(w, map[string]interface{}{
-		"file_id":           file.ID,
-		"encrypted_content": base64.StdEncoding.EncodeToString(file.EncryptedContent),
-		"wrapped_key":       wrappedKey,
-		"metadata":          file.EncryptionMetadata,
-		"original_name":     file.OriginalName,
-		"mime_type":         file.MimeType,
-		"size":              file.Size,
+		"file_id":       file.ID,
+		"blob_url":      file.BlobURL,
+		"blob_hash":     file.BlobHash,
+		"original_name": file.OriginalName,
+		"mime_type":     file.MimeType,
+		"size":          file.Size,
+		"shared_by":     file.SharedBy,
+		"shared_at":     file.SharedAt,
+		"group_id":      file.GroupID,
 	})
 }
 
@@ -222,38 +216,13 @@ func (h *FileHandler) validateFileShareRequest(req models.FileShareRequest) erro
 		return utils.NewValidationError("mime_type is required")
 	}
 
-	// Validate encryption metadata
-	if err := h.validateEncryptionMetadata(req.EncryptionMetadata); err != nil {
-		return err
+	// Validate blob URL and hash (zero-knowledge architecture)
+	if req.BlobURL == "" {
+		return utils.NewValidationError("blob_url is required")
 	}
 
-	return nil
-}
-
-// validateEncryptionMetadata validates the encryption metadata
-func (h *FileHandler) validateEncryptionMetadata(metadata models.FileEncryptionMetadata) error {
-	if len(metadata.EncryptionKey) == 0 {
-		return utils.NewValidationError("encryption key cannot be empty")
-	}
-
-	if len(metadata.IV) == 0 {
-		return utils.NewValidationError("initialization vector cannot be empty")
-	}
-
-	if len(metadata.AuthTag) == 0 {
-		return utils.NewValidationError("authentication tag cannot be empty")
-	}
-
-	if metadata.ChunkSize <= 0 {
-		return utils.NewValidationError("chunk size must be greater than 0")
-	}
-
-	if metadata.TotalChunks <= 0 {
-		return utils.NewValidationError("total chunks must be greater than 0")
-	}
-
-	if metadata.Algorithm == "" {
-		return utils.NewValidationError("encryption algorithm is required")
+	if req.BlobHash == "" {
+		return utils.NewValidationError("blob_hash is required")
 	}
 
 	return nil

@@ -74,6 +74,86 @@ func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	utils.WriteCreatedResponse(w, user.ToResponse())
 }
 
+// LoginUser handles user login
+func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		utils.WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.WriteBadRequestResponse(w, "Invalid JSON payload")
+		return
+	}
+
+	// Validate input
+	if err := utils.ValidateUsername(req.Username); err != nil {
+		utils.WriteBadRequestResponse(w, err.Error())
+		return
+	}
+
+	if req.Password == "" {
+		utils.WriteBadRequestResponse(w, "Password is required")
+		return
+	}
+
+	// Get user by username
+	user, err := h.storage.GetUserByUsername(req.Username)
+	if err != nil {
+		utils.WriteUnauthorizedResponse(w, "Invalid username or password")
+		return
+	}
+
+	// Verify password
+	if !utils.VerifyPassword(req.Password, user.PasswordHash) {
+		utils.WriteUnauthorizedResponse(w, "Invalid username or password")
+		return
+	}
+
+	// Get user's groups
+	groups, err := h.storage.GetGroupsByUser(user.ID)
+	if err != nil {
+		// If we can't get groups, just return empty array
+		groups = []*models.Group{}
+	}
+
+	// Return success response with user and groups
+	response := map[string]interface{}{
+		"user":   user.ToResponse(),
+		"groups": groups,
+	}
+	utils.WriteSuccessResponse(w, response)
+}
+
+// GetUserByUsername handles requests to get a user by username
+func (h *AuthHandler) GetUserByUsername(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Extract username from URL path
+	username := h.extractUsernameFromPath(r.URL.Path)
+	if username == "" {
+		utils.WriteBadRequestResponse(w, "Invalid username in URL")
+		return
+	}
+
+	// Get user by username
+	user, err := h.storage.GetUserByUsername(username)
+	if err != nil {
+		utils.WriteNotFoundResponse(w, "User not found")
+		return
+	}
+
+	// Return user response (without sensitive data)
+	utils.WriteSuccessResponse(w, user.ToResponse())
+}
+
 // validateKeyBundle validates the E2EE key bundle
 func (h *AuthHandler) validateKeyBundle(keyBundle models.KeyBundle) error {
 	// Validate public keys
@@ -209,6 +289,16 @@ func (h *AuthHandler) extractUserIDFromPath(path string) string {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) >= 2 && parts[0] == "users" {
 		return parts[1]
+	}
+	return ""
+}
+
+// extractUsernameFromPath extracts the username from URL paths like /users/by-username/{username}
+func (h *AuthHandler) extractUsernameFromPath(path string) string {
+	// Expected format: /users/by-username/{username}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 3 && parts[0] == "users" && parts[1] == "by-username" {
+		return parts[2]
 	}
 	return ""
 }

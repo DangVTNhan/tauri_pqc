@@ -155,7 +155,7 @@ func (h *GroupHandler) AddWrappedKeysForNewMember(w http.ResponseWriter, r *http
 	}
 
 	var req struct {
-		UserID      string                     `json:"user_id"`
+		UserID      string                       `json:"user_id"`
 		WrappedKeys map[string]models.WrappedKey `json:"wrapped_keys"` // fileID -> wrapped key
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -181,7 +181,7 @@ func (h *GroupHandler) AddWrappedKeysForNewMember(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Add wrapped keys to each file
+	// Send wrapped keys to the new member via message queue
 	for fileID, wrappedKey := range req.WrappedKeys {
 		file, err := h.storage.GetFile(fileID)
 		if err != nil {
@@ -193,10 +193,18 @@ func (h *GroupHandler) AddWrappedKeysForNewMember(w http.ResponseWriter, r *http
 			continue // Skip files not in this group
 		}
 
-		// Add wrapped master key for the new member
-		file.AddWrappedMasterKey(req.UserID, wrappedKey)
-		if err := h.storage.UpdateFile(file); err != nil {
-			utils.WriteInternalErrorResponse(w, "Failed to update file")
+		// Create wrapped message for the new member
+		message := models.NewWrappedMessage(
+			fileID,
+			groupID,
+			"", // SenderID will be extracted from auth context in production
+			req.UserID,
+			wrappedKey,
+		)
+
+		// Send message to user's queue
+		if err := h.storage.SendWrappedMessage(message); err != nil {
+			utils.WriteInternalErrorResponse(w, "Failed to send wrapped key")
 			return
 		}
 	}

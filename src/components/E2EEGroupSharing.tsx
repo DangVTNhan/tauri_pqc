@@ -85,7 +85,7 @@ export function E2EEGroupSharing() {
 
       // Register with backend
       const result = await api.register(username, password, keyBundle);
-      
+
       if (result.success && result.user) {
         login(result.user, []);
         toast.success('Registration successful!');
@@ -96,6 +96,34 @@ export function E2EEGroupSharing() {
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Registration failed');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) {
+      setError('Please enter both username and password');
+      return;
+    }
+
+    setIsAuthLoading(true);
+    clearError();
+
+    try {
+      // Login with backend
+      const result = await api.login(username, password);
+
+      if (result.success && result.user) {
+        login(result.user, result.groups || []);
+        toast.success('Login successful!');
+        setUsername('');
+        setPassword('');
+      } else {
+        setError(result.error || 'Login failed');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Login failed');
     } finally {
       setIsAuthLoading(false);
     }
@@ -137,11 +165,17 @@ export function E2EEGroupSharing() {
     clearError();
 
     try {
-      // For demo purposes, we'll create a dummy user ID from username
-      const userId = `user_${memberUsername.toLowerCase()}`;
-      
-      const result = await api.addMember(selectedGroupId, userId);
-      
+      // Look up the user by username to get their actual user ID
+      const userResult = await api.getUserByUsername(memberUsername.trim());
+
+      if (!userResult.success || !userResult.user) {
+        setError(userResult.error || 'User not found');
+        return;
+      }
+
+      // Add the member using their actual user ID
+      const result = await api.addMember(selectedGroupId, userResult.user.id);
+
       if (result.success) {
         toast.success('Member added successfully!');
         setMemberUsername('');
@@ -180,7 +214,7 @@ export function E2EEGroupSharing() {
       setUploadProgress(prev => prev ? { ...prev, progress: 20 } : null);
 
       // Encrypt file with master key
-      const { encryptedData, metadata } = await encryptFileWithMasterKey(fileData, masterKey);
+      const { encryptedData } = await encryptFileWithMasterKey(fileData, masterKey);
 
       setUploadProgress(prev => prev ? { ...prev, progress: 40 } : null);
 
@@ -218,17 +252,41 @@ export function E2EEGroupSharing() {
         };
       }
 
-      setUploadProgress(prev => prev ? { ...prev, progress: 80, status: 'uploading' } : null);
+      setUploadProgress(prev => prev ? { ...prev, progress: 70, status: 'uploading to blob storage' } : null);
 
-      // Share file with group
-      const result = await api.shareFile(
+      // Step 1: Upload encrypted file to blob storage
+      const blobResult = await api.uploadBlob(encryptedData);
+      if (!blobResult.success || !blobResult.data) {
+        throw new Error(blobResult.error || 'Failed to upload to blob storage');
+      }
+
+      setUploadProgress(prev => prev ? { ...prev, progress: 80, status: 'sharing file metadata' } : null);
+
+      // Step 2: Share file metadata with group (zero-knowledge) - creates file record
+      const result = await api.shareFileMetadata(
         selectedGroupId,
         file,
-        encryptedData,
-        wrappedMasterKeys,
-        metadata,
+        blobResult.data.blob_url,
+        blobResult.data.blob_hash,
         user.id
       );
+
+      if (!result.success || !result.file) {
+        throw new Error(result.error || 'Failed to share file metadata');
+      }
+
+      setUploadProgress(prev => prev ? { ...prev, progress: 90, status: 'sending wrapped keys' } : null);
+
+      // Step 3: Send wrapped keys to group members via message queue (using real file ID)
+      const keyResult = await api.sendBulkWrappedKeys(
+        result.file.id, // Use actual file ID from metadata creation
+        selectedGroupId,
+        wrappedMasterKeys
+      );
+
+      if (!keyResult.success) {
+        throw new Error(keyResult.error || 'Failed to send wrapped keys');
+      }
 
       if (result.success && result.file) {
         setUploadProgress(prev => prev ? { ...prev, progress: 100, status: 'complete' } : null);
@@ -273,28 +331,50 @@ export function E2EEGroupSharing() {
     try {
       toast.info('Downloading and decrypting file...');
 
-      // Get file content and wrapped key from backend
-      const { content } = await api.getFileContent(file.id, user.id);
-      if (!content) {
-        throw new Error('Failed to get file content');
+      // Step 1: Get user's message queue to find wrapped keys for this file
+      const messagesResult = await api.getUserMessages(user.id);
+      if (!messagesResult.success || !messagesResult.data) {
+        throw new Error('Failed to get user messages');
       }
 
-      // For demo purposes, show that we got the encrypted content
-      toast.success(`Retrieved encrypted file: ${file.original_name} (${content.size} bytes)`);
+      // Find wrapped key for this file
+      const wrappedMessage = messagesResult.data.messages.find(
+        (msg: any) => msg.file_id === file.id && !msg.processed
+      );
+
+      if (!wrappedMessage) {
+        throw new Error('No access key found for this file. You may not have permission to download it.');
+      }
+
+      toast.info('Found access key, downloading encrypted file...');
+
+      // Step 2: Download encrypted blob from blob storage
+      const blobResult = await api.downloadBlob(file.blob_url);
+      if (!blobResult.success || !blobResult.data) {
+        throw new Error('Failed to download encrypted file');
+      }
+
+      // Step 3: Mark message as processed
+      await api.markMessageProcessed(wrappedMessage.id);
+
+      // For demo purposes, show that we got the encrypted content and wrapped key
+      toast.success(`Retrieved encrypted file: ${file.original_name} (${blobResult.data.size} bytes)`);
+
+      console.log('Zero-knowledge download successful:', {
+        fileId: file.id,
+        originalName: file.original_name,
+        encryptedSize: blobResult.data.size,
+        blobHash: blobResult.data.blob_hash,
+        hasWrappedKey: !!wrappedMessage.wrapped_key,
+        wrappedKey: wrappedMessage.wrapped_key,
+      });
 
       // Placeholder for the full implementation:
       // 1. Get user's private keys from secure storage
-      // 2. Derive shared secret using key exchange data
-      // 3. Unwrap master key using shared secret
-      // 4. Decrypt file content with master key
+      // 2. Derive shared secret using key exchange data from wrappedMessage.wrapped_key.key_exchange
+      // 3. Unwrap master key using shared secret and wrappedMessage.wrapped_key.encrypted_key
+      // 4. Decrypt file content with master key (blobResult.data.encrypted_content)
       // 5. Create downloadable blob and trigger download
-
-      console.log('File content retrieved:', {
-        fileId: content.file_id,
-        originalName: content.original_name,
-        encryptedSize: content.encrypted_content.length,
-        hasWrappedKey: !!content.wrapped_key,
-      });
 
     } catch (error) {
       toast.error('Failed to download file');
@@ -376,9 +456,8 @@ export function E2EEGroupSharing() {
                     variant={authMode === 'login' ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => setAuthMode('login')}
-                    disabled
                   >
-                    Login (Demo)
+                    Login
                   </Button>
                 </div>
 
@@ -405,7 +484,7 @@ export function E2EEGroupSharing() {
                     />
                   </div>
                   <Button
-                    onClick={handleRegister}
+                    onClick={authMode === 'register' ? handleRegister : handleLogin}
                     disabled={isAuthLoading || !username.trim() || !password.trim()}
                     className="w-full"
                   >
@@ -423,12 +502,19 @@ export function E2EEGroupSharing() {
                   </Button>
                 </div>
 
-                {authMode === 'register' && (
-                  <div className="text-xs text-muted-foreground bg-muted p-3 rounded">
-                    <strong>Note:</strong> Registration will automatically generate E2EE key bundles 
-                    for secure communication. Your keys are generated locally and never sent in plain text.
-                  </div>
-                )}
+                <div className="text-xs text-muted-foreground bg-muted p-3 rounded">
+                  {authMode === 'register' ? (
+                    <>
+                      <strong>Note:</strong> Registration will automatically generate E2EE key bundles
+                      for secure communication. Your keys are generated locally and never sent in plain text.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Note:</strong> Login will authenticate you with your existing account
+                      and restore access to your groups and encrypted files.
+                    </>
+                  )}
+                </div>
               </>
             ) : (
               <div className="space-y-4">
