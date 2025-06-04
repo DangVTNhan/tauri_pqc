@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{RwLock, oneshot};
 use tokio::net::TcpListener;
-use hyper::{server::conn::http1, service::service_fn, Request, body::Incoming};
+use hyper::{server::conn::http1, service::service_fn, Request, body::Incoming, Response, StatusCode, header::HeaderValue};
 use hyper_util::rt::TokioIo;
 use dav_server::{DavHandler, fakels::FakeLs};
 use uuid::Uuid;
+use base64::Engine;
 
 use crate::models::vault::VaultMetadata;
 use crate::models::webdav::{VaultMount, VaultStatus, WebDavConfig};
@@ -28,8 +29,40 @@ impl WebDavServerManager {
     pub fn new() -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
-            next_port: Arc::new(RwLock::new(8080)),
+            next_port: Arc::new(RwLock::new(6969)),
         }
+    }
+
+    /// Generate authentication credentials (using default for easier testing)
+    fn generate_credentials() -> (String, String) {
+        // Use default credentials for easier testing and development
+        // In production, these should be configurable or randomly generated
+        let username = "vault_user".to_string();
+        let password = "vault_pass".to_string();
+
+        println!("WebDAV Server using credentials - Username: {}, Password: {}", username, password);
+
+        (username, password)
+    }
+
+    /// Check basic authentication
+    fn check_auth(req: &Request<Incoming>, expected_username: &str, expected_password: &str) -> bool {
+        if let Some(auth_header) = req.headers().get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if auth_str.starts_with("Basic ") {
+                    let encoded = &auth_str[6..];
+                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+                        if let Ok(credentials) = String::from_utf8(decoded) {
+                            let parts: Vec<&str> = credentials.splitn(2, ':').collect();
+                            if parts.len() == 2 {
+                                return parts[0] == expected_username && parts[1] == expected_password;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Start a WebDAV server for a vault
@@ -41,6 +74,8 @@ impl WebDavServerManager {
         vault_path: PathBuf,
         custom_port: Option<u16>,
     ) -> Result<VaultMount, String> {
+        println!("🚀 You reached start_server!");
+
         // Check if server is already running
         {
             let servers = self.servers.read().await;
@@ -49,15 +84,15 @@ impl WebDavServerManager {
             }
         }
 
-        // Get port to use
+        // Use fixed port 6969 for all vaults (path-based routing)
         let port = if let Some(port) = custom_port {
             port
         } else {
-            let mut next_port = self.next_port.write().await;
-            let port = *next_port;
-            *next_port += 1;
-            port
+            6969 // Fixed port for all vaults
         };
+
+        // Generate authentication credentials
+        let (username, password) = Self::generate_credentials();
 
         // Create filesystem adapter
         let filesystem = VaultFileSystem::new(vault_metadata.clone(), encryption_service, vault_path.clone()).await
@@ -72,26 +107,39 @@ impl WebDavServerManager {
 
         // Create server address
         let addr: SocketAddr = ([127, 0, 0, 1], port).into();
-
-        // Create shutdown channel
+        println!("🚀 Starting WebDAV server on {} for vault: {}", addr, vault_metadata.name);
+        println!("📂 WebDAV URL will be: http://127.0.0.1:{}/{}/", port, vault_metadata.name);
+        println!("🔐 WebDAV credentials: username={}, password={}", username, password);
+                // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        // Create startup notification channel
+        let (startup_tx, startup_rx) = oneshot::channel::<Result<(), String>>();
 
         // Start the server
         let servers_clone = self.servers.clone();
         let vault_id_clone = vault_id;
         let vault_path_clone = vault_path.clone();
+        let auth_username = username.clone();
+        let auth_password = password.clone();
+        let vault_name_for_mount = vault_metadata.name.clone();
 
         let server_handle = tokio::spawn(async move {
             let listener = match TcpListener::bind(addr).await {
-                Ok(listener) => listener,
+                Ok(listener) => {
+                    // Notify that server is ready
+                    let _ = startup_tx.send(Ok(()));
+                    listener
+                },
                 Err(e) => {
                     eprintln!("Failed to bind to address {}: {}", addr, e);
+                    let _ = startup_tx.send(Err(format!("Failed to bind to address {}: {}", addr, e)));
                     return;
                 }
             };
 
-            println!("WebDAV server listening on {}", addr);
-            println!("WebDAV server serving files from: {:?}", vault_path_clone.join("files"));
+            println!("✅ WebDAV server listening on {}", addr);
+            println!("📁 WebDAV server serving files from: {:?}", vault_path_clone.join("files"));
 
             let mut shutdown_rx = shutdown_rx;
 
@@ -104,22 +152,59 @@ impl WebDavServerManager {
                                 let dav_handler = dav_handler.clone();
                                 let io = TokioIo::new(stream);
 
+                                let auth_username_clone = auth_username.clone();
+                                let auth_password_clone = auth_password.clone();
+                                let vault_name_clone = vault_metadata.name.clone();
                                 tokio::task::spawn(async move {
                                     if let Err(err) = http1::Builder::new()
                                         .serve_connection(
                                             io,
                                             service_fn({
-                                                move |req: Request<Incoming>| {
+                                                move |mut req: Request<Incoming>| {
                                                     let dav_handler = dav_handler.clone();
+                                                    let auth_username = auth_username_clone.clone();
+                                                    let auth_password = auth_password_clone.clone();
+                                                    let vault_name = vault_name_clone.clone();
                                                     async move {
-                                                        // Log the incoming request
-                                                        println!("WebDAV Request: {} {}", req.method(), req.uri());
-                                                        println!("WebDAV Headers: {:?}", req.headers());
+                                                        // Check authentication
+                                                        // if !WebDavServerManager::check_auth(&req, &auth_username, &auth_password) {
+                                                        //     println!("WebDAV Authentication failed");
+                                                        //     let mut response = Response::new(hyper::body::Bytes::from("Authentication required").into());
+                                                        //     *response.status_mut() = StatusCode::UNAUTHORIZED;
+                                                        //     response.headers_mut().insert(
+                                                        //         "WWW-Authenticate",
+                                                        //         HeaderValue::from_static("Basic realm=\"WebDAV\"")
+                                                        //     );
+                                                        //     return Ok::<_, Infallible>(response);
+                                                        // }
+
+                                                        // Handle path-based routing for vault
+                                                        let original_path = req.uri().path().to_string();
+                                                        let vault_prefix = format!("/{}/", vault_name);
+
+                                                        // Strip vault prefix from path
+                                                        let new_path = if original_path.starts_with(&vault_prefix) {
+                                                            original_path[vault_prefix.len()-1..].to_string() // Keep the leading slash
+                                                        } else if original_path == format!("/{}", vault_name) {
+                                                            "/".to_string() // Root directory access
+                                                        } else {
+                                                            // Path doesn't match vault, return 404
+                                                            let mut response = Response::new(hyper::body::Bytes::from("Not Found").into());
+                                                            *response.status_mut() = StatusCode::NOT_FOUND;
+                                                            return Ok::<_, Infallible>(response);
+                                                        };
+
+                                                        // Create new URI with stripped path
+                                                        let mut uri_parts = req.uri().clone().into_parts();
+                                                        uri_parts.path_and_query = Some(new_path.parse().unwrap_or_else(|_| "/".parse().unwrap()));
+                                                        let new_uri = hyper::Uri::from_parts(uri_parts).unwrap_or_else(|_| "/".parse().unwrap());
+
+                                                        // Update request URI
+                                                        *req.uri_mut() = new_uri;
+
 
                                                         let response = dav_handler.handle(req).await;
 
-                                                        // Log the response status
-                                                        println!("WebDAV Response: {}", response.status());
 
                                                         Ok::<_, Infallible>(response)
                                                     }
@@ -161,17 +246,19 @@ impl WebDavServerManager {
         // Create vault mount
         let mut vault_mount = VaultMount::new(
             vault_id,
-            vault_metadata.name.clone(),
+            vault_name_for_mount.clone(),
             vault_path,
         );
         vault_mount.status = VaultStatus::Unlocked;
         vault_mount.webdav_config = WebDavConfig {
-            host: vault_metadata.name.clone(),
-            port,
+            host: "127.0.0.1".to_string(), // Use 127.0.0.1 to match server binding
+            port, // Use the actual port (custom or default 6969)
             is_running: true,
             started_at: Some(chrono::Utc::now()),
+            username: Some(username),
+            password: Some(password),
         };
-        vault_mount.mount_url = Some(format!("http://{}:{}/", vault_metadata.name, port));
+        vault_mount.mount_url = Some(format!("http://127.0.0.1:{}/{}/", port, vault_name_for_mount));
 
         // Store server instance
         {
@@ -179,7 +266,25 @@ impl WebDavServerManager {
             servers.insert(vault_id, server_instance);
         }
 
-        Ok(vault_mount)
+        // Wait for server to actually start listening before returning
+        match startup_rx.await {
+            Ok(Ok(())) => {
+                println!("🎉 WebDAV server startup confirmed - ready for mounting!");
+                Ok(vault_mount)
+            },
+            Ok(Err(e)) => {
+                // Remove the failed server instance
+                let mut servers = self.servers.write().await;
+                servers.remove(&vault_id);
+                Err(format!("Failed to start WebDAV server: {}", e))
+            },
+            Err(_) => {
+                // Remove the failed server instance
+                let mut servers = self.servers.write().await;
+                servers.remove(&vault_id);
+                Err("WebDAV server startup notification failed".to_string())
+            }
+        }
     }
 
     /// Stop a WebDAV server for a vault

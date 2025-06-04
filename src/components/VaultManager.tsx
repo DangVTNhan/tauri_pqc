@@ -95,6 +95,9 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
     setIsUnlocking(true);
     setPasswordError('');
 
+    console.log("password: " + password);
+    console.log("select vault id" + selectedVault.id);
+
     try {
       const response = await invoke<{
         success: boolean;
@@ -331,10 +334,6 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
       setLoading(false);
     }
   };
-
-
-
-
 
   const removeVault = async (vaultId: string) => {
     if (!confirm("Are you sure you want to remove this vault configuration? This will not delete the vault file.")) {

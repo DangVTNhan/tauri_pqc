@@ -15,15 +15,21 @@ pub struct WebDavConfig {
     pub is_running: bool,
     /// Server start time
     pub started_at: Option<DateTime<Utc>>,
+    /// WebDAV authentication username
+    pub username: Option<String>,
+    /// WebDAV authentication password
+    pub password: Option<String>,
 }
 
 impl Default for WebDavConfig {
     fn default() -> Self {
         Self {
-            host: "localhost".to_string(), // Default placeholder, will be replaced with vault name
-            port: 8080,
+            host: "localhost".to_string(), // Use localhost for better compatibility
+            port: 6969, // Fixed port for all vaults
             is_running: false,
             started_at: None,
+            username: None,
+            password: None,
         }
     }
 }
@@ -84,11 +90,7 @@ impl VaultMount {
     /// Get the WebDAV mount URL
     pub fn get_mount_url(&self) -> Option<String> {
         if self.status == VaultStatus::Unlocked && self.webdav_config.is_running {
-            Some(format!(
-                "http://{}:{}/",
-                self.webdav_config.host,
-                self.webdav_config.port
-            ))
+            self.mount_url.clone()
         } else {
             None
         }
@@ -152,7 +154,7 @@ impl WebDavState {
     pub fn new() -> Self {
         Self {
             mounted_vaults: HashMap::new(),
-            next_port: 8080,
+            next_port: 6969,
         }
     }
 
