@@ -14,8 +14,6 @@ pub fn greet_multi_param(name: &str, age: u8) -> String {
 /// Unmounts by vault name only
 #[tauri::command]
 pub async fn unmount_webdav_volume(vault_name: Option<String>) -> Result<(), String> {
-    use std::process::Command;
-
     println!("Attempting to unmount WebDAV volume for vault: {:?}", vault_name);
 
     #[cfg(target_os = "macos")]
@@ -39,10 +37,16 @@ pub async fn unmount_webdav_volume(vault_name: Option<String>) -> Result<(), Str
 
         println!("Executing unmount AppleScript for volume: {}", volume_name);
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .output();
+        // Use tokio::task::spawn_blocking to properly handle the blocking osascript call
+        let output = tokio::task::spawn_blocking({
+            let script = script.clone();
+            move || {
+                std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(&script)
+                    .output()
+            }
+        }).await.map_err(|e| format!("Failed to spawn blocking task: {}", e))?;
 
         match output {
             Ok(output) => {
@@ -90,7 +94,6 @@ pub async fn mount_webdav_volume(
     username: String,
     password: String
 ) -> Result<(), String> {
-    use std::process::Command;
     #[cfg(target_os = "macos")]
     {
         // Use proper AppleScript with authentication - simplified to avoid disk renaming issues
@@ -117,10 +120,16 @@ end try"#,
         println!("🍎 Executing AppleScript to mount WebDAV volume for vault: {}", vault_name);
         println!("   AppleScript will attempt to mount: {}", url);
 
-        let mount_output = Command::new("osascript")
-            .arg("-e")
-            .arg(&mount_script)
-            .output();
+        // Use tokio::task::spawn_blocking to properly handle the blocking osascript call
+        let mount_output = tokio::task::spawn_blocking({
+            let mount_script = mount_script.clone();
+            move || {
+                std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(&mount_script)
+                    .output()
+            }
+        }).await.map_err(|e| format!("Failed to spawn blocking task: {}", e))?;
 
         match mount_output {
             Ok(output) => {
@@ -873,8 +882,6 @@ pub struct KyberEncapsulationResult {
 /// Open URL in system default application or mount WebDAV volume
 #[tauri::command]
 pub async fn open_url(url: String, vault_name: Option<String>) -> Result<(), String> {
-    use std::process::Command;
-
     println!("Attempting to mount WebDAV URL in Finder: {}", url);
 
     #[cfg(target_os = "macos")]
@@ -895,10 +902,16 @@ pub async fn open_url(url: String, vault_name: Option<String>) -> Result<(), Str
 
         println!("Executing mount AppleScript: {}", mount_script);
 
-        let mount_output = Command::new("osascript")
-            .arg("-e")
-            .arg(&mount_script)
-            .output();
+        // Use tokio::task::spawn_blocking to properly handle the blocking osascript call
+        let mount_output = tokio::task::spawn_blocking({
+            let mount_script = mount_script.clone();
+            move || {
+                std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(&mount_script)
+                    .output()
+            }
+        }).await.map_err(|e| format!("Failed to spawn blocking task: {}", e))?;
 
         match mount_output {
             Ok(output) => {
@@ -920,7 +933,7 @@ pub async fn open_url(url: String, vault_name: Option<String>) -> Result<(), Str
 
                     // Try alternative method using open command
                     println!("Trying alternative method with 'open' command...");
-                    let open_result = Command::new("open")
+                    let open_result = std::process::Command::new("open")
                         .arg(&url)
                         .output();
 
@@ -945,7 +958,7 @@ pub async fn open_url(url: String, vault_name: Option<String>) -> Result<(), Str
 
                 // Try alternative method using open command
                 println!("Trying alternative method with 'open' command...");
-                let open_result = Command::new("open")
+                let open_result = std::process::Command::new("open")
                     .arg(&url)
                     .output();
 
@@ -980,10 +993,16 @@ pub async fn open_url(url: String, vault_name: Option<String>) -> Result<(), Str
         end tell"#;
 
         println!("Listing all available disks...");
-        let list_output = Command::new("osascript")
-            .arg("-e")
-            .arg(list_disks_script)
-            .output();
+        // Use tokio::task::spawn_blocking to properly handle the blocking osascript call
+        let list_output = tokio::task::spawn_blocking({
+            let list_disks_script = list_disks_script.to_string();
+            move || {
+                std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(&list_disks_script)
+                    .output()
+            }
+        }).await.map_err(|e| format!("Failed to spawn blocking task: {}", e))?;
 
         match list_output {
             Ok(output) => {
@@ -1014,10 +1033,16 @@ pub async fn open_url(url: String, vault_name: Option<String>) -> Result<(), Str
 
             println!("Executing open disk AppleScript for: {}", disk_name);
 
-            let open_output = Command::new("osascript")
-                .arg("-e")
-                .arg(&open_script)
-                .output();
+            // Use tokio::task::spawn_blocking to properly handle the blocking osascript call
+            let open_output = tokio::task::spawn_blocking({
+                let open_script = open_script.clone();
+                move || {
+                    std::process::Command::new("osascript")
+                        .arg("-e")
+                        .arg(&open_script)
+                        .output()
+                }
+            }).await.map_err(|e| format!("Failed to spawn blocking task: {}", e))?;
 
             match open_output {
                 Ok(output) => {

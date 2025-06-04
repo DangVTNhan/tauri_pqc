@@ -335,10 +335,6 @@ export function VaultManager({ vaults, onVaultUpdate }: VaultManagerProps) {
     }
   };
 
-
-
-
-
   const removeVault = async (vaultId: string) => {
     if (!confirm("Are you sure you want to remove this vault configuration? This will not delete the vault file.")) {
       return;

@@ -110,9 +110,7 @@ impl WebDavServerManager {
         println!("🚀 Starting WebDAV server on {} for vault: {}", addr, vault_metadata.name);
         println!("📂 WebDAV URL will be: http://127.0.0.1:{}/{}/", port, vault_metadata.name);
         println!("🔐 WebDAV credentials: username={}, password={}", username, password);
-        println!("⚠️  Make sure this is port {} (WebDAV), NOT port 8080 (Go backend)!", port);
-
-        // Create shutdown channel
+                // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
         // Create startup notification channel
@@ -168,23 +166,17 @@ impl WebDavServerManager {
                                                     let auth_password = auth_password_clone.clone();
                                                     let vault_name = vault_name_clone.clone();
                                                     async move {
-                                                        // Log the incoming request with clear formatting
-                                                        println!("📥 WebDAV Request: {} {} (Port {})", req.method(), req.uri(), port);
-                                                        println!("   Host: {:?}", req.headers().get("host"));
-                                                        println!("   User-Agent: {:?}", req.headers().get("user-agent"));
-                                                        println!("   Authorization: {}", if req.headers().get("authorization").is_some() { "Present" } else { "Missing" });
-
                                                         // Check authentication
-                                                        if !WebDavServerManager::check_auth(&req, &auth_username, &auth_password) {
-                                                            println!("WebDAV Authentication failed");
-                                                            let mut response = Response::new(hyper::body::Bytes::from("Authentication required").into());
-                                                            *response.status_mut() = StatusCode::UNAUTHORIZED;
-                                                            response.headers_mut().insert(
-                                                                "WWW-Authenticate",
-                                                                HeaderValue::from_static("Basic realm=\"WebDAV\"")
-                                                            );
-                                                            return Ok::<_, Infallible>(response);
-                                                        }
+                                                        // if !WebDavServerManager::check_auth(&req, &auth_username, &auth_password) {
+                                                        //     println!("WebDAV Authentication failed");
+                                                        //     let mut response = Response::new(hyper::body::Bytes::from("Authentication required").into());
+                                                        //     *response.status_mut() = StatusCode::UNAUTHORIZED;
+                                                        //     response.headers_mut().insert(
+                                                        //         "WWW-Authenticate",
+                                                        //         HeaderValue::from_static("Basic realm=\"WebDAV\"")
+                                                        //     );
+                                                        //     return Ok::<_, Infallible>(response);
+                                                        // }
 
                                                         // Handle path-based routing for vault
                                                         let original_path = req.uri().path().to_string();
@@ -197,10 +189,6 @@ impl WebDavServerManager {
                                                             "/".to_string() // Root directory access
                                                         } else {
                                                             // Path doesn't match vault, return 404
-                                                            println!("❌ WebDAV path mismatch: {} doesn't match vault '{}'", original_path, vault_name);
-                                                            println!("   Expected path: /{}/", vault_name);
-                                                            println!("   Received path: {}", original_path);
-                                                            println!("   This suggests the client is using wrong vault name or cached connection");
                                                             let mut response = Response::new(hyper::body::Bytes::from("Not Found").into());
                                                             *response.status_mut() = StatusCode::NOT_FOUND;
                                                             return Ok::<_, Infallible>(response);
@@ -214,12 +202,9 @@ impl WebDavServerManager {
                                                         // Update request URI
                                                         *req.uri_mut() = new_uri;
 
-                                                        println!("   Path rewritten: {} -> {}", original_path, req.uri().path());
 
                                                         let response = dav_handler.handle(req).await;
 
-                                                        // Log the response status with clear formatting
-                                                        println!("📤 WebDAV Response: {} (Port {})", response.status(), port);
 
                                                         Ok::<_, Infallible>(response)
                                                     }
