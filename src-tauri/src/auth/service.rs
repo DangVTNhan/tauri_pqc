@@ -59,15 +59,20 @@ impl AuthService {
             public_key_bundle: api_public_keys,
         };
 
-        let api_response = self.api_client.post::<RegisterResponse, _>("/register", &api_request).await
+        // The Go backend returns a wrapped response structure, so we need to handle it properly
+        let api_response = self.api_client.post::<serde_json::Value, _>("/register", &api_request).await
             .map_err(|e| format!("API registration failed: {}", e))?;
 
         if !api_response.success {
             return Err(api_response.error.unwrap_or_else(|| "Registration failed".to_string()));
         }
 
-        let register_response = api_response.data
+        let response_data = api_response.data
             .ok_or_else(|| "No data in registration response".to_string())?;
+
+        // Parse the nested response structure
+        let register_response: RegisterResponse = serde_json::from_value(response_data)
+            .map_err(|e| format!("Failed to parse registration response: {}", e))?;
 
         // Store user locally with encrypted private keys
         let auth_user = self.auth_storage.register_user(username, password).await
@@ -97,15 +102,20 @@ impl AuthService {
             username: username.clone(),
         };
 
-        let api_response = self.api_client.post::<LoginResponse, _>("/login", &api_request).await
+        // The Go backend returns a wrapped response structure, so we need to handle it properly
+        let api_response = self.api_client.post::<serde_json::Value, _>("/login", &api_request).await
             .map_err(|e| format!("API login failed: {}", e))?;
 
         if !api_response.success {
             return Err(api_response.error.unwrap_or_else(|| "Login failed".to_string()));
         }
 
-        let login_response = api_response.data
+        let response_data = api_response.data
             .ok_or_else(|| "No data in login response".to_string())?;
+
+        // Parse the nested response structure
+        let login_response: LoginResponse = serde_json::from_value(response_data)
+            .map_err(|e| format!("Failed to parse login response: {}", e))?;
 
         // Fetch pending messages from server
         let messages_response = self.api_client.get::<UserMessagesResponse>(&format!("/users/{}/messages", auth_user.id)).await;

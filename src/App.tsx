@@ -1,4 +1,4 @@
-import { ConfigDemo } from "@/components/ConfigDemo";
+import { ConfigDemo } from "@/components/VaultManagerWrapper";
 // import { E2EEDemo } from "@/components/E2EEDemo";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";

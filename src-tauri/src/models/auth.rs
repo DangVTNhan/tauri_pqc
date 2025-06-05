@@ -105,10 +105,11 @@ pub struct ApiUser {
 pub struct ApiGroup {
     pub id: String,
     pub name: String,
-    pub creator_id: String,
+    pub created_by: String,  // Match Go backend field name
     pub members: Vec<String>,
     pub created_at: String,
-    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,  // Make optional since Go backend might not always include it
 }
 
 /// Public key bundle for API communication (matches Go backend structure)

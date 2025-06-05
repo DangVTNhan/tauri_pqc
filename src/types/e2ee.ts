@@ -31,6 +31,7 @@ export interface User {
   id: string;
   username: string;
   created_at: string; // ISO string
+  keyBundle?: KeyBundle; // Optional key bundle for authenticated users
 }
 
 export interface UserRegistrationRequest {
@@ -67,7 +68,7 @@ export interface GroupSettings {
 
 export interface GroupCreateRequest {
   name: string;
-  creator_id: string;
+  creator_id: string; // Keep this as creator_id for the API request
 }
 
 export interface GroupMemberRequest {
@@ -147,7 +148,7 @@ export interface UserSession {
 export interface FileUploadProgress {
   file_name: string;
   progress: number; // 0-100
-  status: 'encrypting' | 'uploading' | 'uploading to blob storage' | 'sending wrapped keys' | 'sharing file metadata' | 'complete' | 'error';
+  status: 'encrypting' | 'uploading' | 'uploading to blob storage' | 'performing key exchange' | 'sending wrapped keys' | 'sharing file metadata' | 'complete' | 'error';
   error?: string;
 }
 
