@@ -1,5 +1,5 @@
 import { ConfigDemo } from "@/components/ConfigDemo";
-import { E2EEDemo } from "@/components/E2EEDemo";
+// import { E2EEDemo } from "@/components/E2EEDemo";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { Toaster } from "sonner";
@@ -19,12 +19,12 @@ function App() {
             >
               E2EE Group Sharing
             </Button>
-            <Button
+            {/* <Button
               variant={activeTab === 'test' ? "default" : "outline"}
               onClick={() => setActiveTab('test')}
             >
               System Test
-            </Button>
+            </Button> */}
             <Button
               variant={activeTab === 'config' ? "default" : "outline"}
               onClick={() => setActiveTab('config')}
@@ -35,7 +35,7 @@ function App() {
         </div>
 
         {activeTab === 'sharing' && <E2EEGroupSharing />}
-        {activeTab === 'test' && <E2EEDemo />}
+        {/* {activeTab === 'test' && <E2EEDemo />} */}
         {activeTab === 'config' && <ConfigDemo />}
       </div>
       <Toaster position="top-right" />
