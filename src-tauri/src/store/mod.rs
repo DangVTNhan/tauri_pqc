@@ -15,6 +15,7 @@ pub mod error;
 pub mod memory;
 pub mod sqlite;
 pub mod traits;
+pub mod auth;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,7 @@ pub use error::{StorageError, StorageResult};
 pub use memory::MemoryStorage;
 pub use sqlite::SQLiteStorage;
 pub use traits::{Storage, Transaction, StorageStatistics, QueryOptions, QueryableStorage};
+pub use auth::AuthStorage;
 
 use std::sync::Arc;
 

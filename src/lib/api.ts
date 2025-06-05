@@ -1,92 +1,92 @@
-// API utilities for communicating with Go backend
+// API utilities for communicating with Go backend through Tauri commands
+// This maintains zero-knowledge E2EE architecture by routing all API calls through Rust backend
 
+import { invoke } from '@tauri-apps/api/core';
 import type {
     APIResponse,
     FileContentResponse,
-    FileShareRequest,
     Group,
     GroupCreateRequest,
     GroupMemberRequest,
     PublicKeyBundleResponse,
     SharedFile,
     User,
-    UserLoginRequest,
-    UserLoginResponse,
-    UserRegistrationRequest,
     WrappedKey
 } from '@/types/e2ee';
 
+// Authentication API functions
+export const authApi = {
+  // Register a new user
+  async register(username: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
+    try {
+      const response = await invoke<any>('auth_register', { username, password });
+      return { success: true, user: response.user };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
+  },
 
-const API_BASE_URL = 'http://localhost:8080';
+  // Login user
+  async login(username: string, password: string): Promise<{ success: boolean; user?: User; groups?: Group[]; error?: string }> {
+    try {
+      const response = await invoke<any>('auth_login', { username, password });
+      return {
+        success: true,
+        user: response.user,
+        groups: response.groups
+      };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
+  },
+
+  // Logout current user
+  async logout(): Promise<{ success: boolean; error?: string }> {
+    try {
+      await invoke('auth_logout');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
+  },
+
+  // Check if user is logged in
+  async isLoggedIn(): Promise<boolean> {
+    try {
+      return await invoke<boolean>('auth_is_logged_in');
+    } catch {
+      return false;
+    }
+  },
+
+  // Get current user session
+  async getCurrentSession(): Promise<any | null> {
+    try {
+      return await invoke<any>('auth_get_current_session');
+    } catch {
+      return null;
+    }
+  },
+
+  // Get current user
+  async getCurrentUser(): Promise<any | null> {
+    try {
+      return await invoke<any>('auth_get_current_user');
+    } catch {
+      return null;
+    }
+  },
+};
 
 class APIClient {
-  private baseUrl: string;
-
-  constructor(baseUrl: string = API_BASE_URL) {
-    this.baseUrl = baseUrl;
-  }
-
-  private async request<T>(
-    endpoint: string, 
-    options: RequestInit = {}
-  ): Promise<APIResponse<T>> {
-    const url = `${this.baseUrl}${endpoint}`;
-    
-    const defaultHeaders = {
-      'Content-Type': 'application/json',
-    };
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          ...defaultHeaders,
-          ...options.headers,
-        },
-      });
-
-      const data = await response.json();
-      
-      if (!response.ok) {
-        return {
-          success: false,
-          error: data.error || `HTTP ${response.status}: ${response.statusText}`,
-        };
-      }
-
-      return data;
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Network error occurred',
-      };
-    }
-  }
-
   // Health check
   async healthCheck(): Promise<APIResponse<{ status: string; service: string; version: string }>> {
-    return this.request('/health');
-  }
-
-  // User registration
-  async registerUser(request: UserRegistrationRequest): Promise<APIResponse<User>> {
-    return this.request('/register', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  // User login
-  async loginUser(request: UserLoginRequest): Promise<APIResponse<UserLoginResponse>> {
-    return this.request('/login', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  // Get user by username
-  async getUserByUsername(username: string): Promise<APIResponse<User>> {
-    return this.request(`/users/by-username/${encodeURIComponent(username)}`);
+    try {
+      const data = await invoke<any>('api_health_check');
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Upload encrypted blob to storage
@@ -96,19 +96,37 @@ class APIClient {
     blob_hash: string;
     size: number;
   }>> {
-    // Calculate hash of the base64-decoded binary data
-    const binaryData = Uint8Array.from(atob(encryptedContent), c => c.charCodeAt(0));
-    const hashBuffer = await crypto.subtle.digest('SHA-256', binaryData);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    try {
+      const data = await invoke<any>('api_upload_blob', { encryptedContent });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
+  }
 
-    return this.request('/blobs/upload', {
-      method: 'POST',
-      body: JSON.stringify({
-        encrypted_content: encryptedContent,
-        blob_hash: hashHex,
-      }),
-    });
+  // Get user by username
+  async getUserByUsername(username: string): Promise<APIResponse<User>> {
+    try {
+      const data = await invoke<any>('api_get_user_by_username', { username });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
+  }
+
+  // Download encrypted blob from storage
+  async downloadBlob(blobUrl: string): Promise<APIResponse<{
+    blob_id: string;
+    encrypted_content: string;
+    blob_hash: string;
+    size: number;
+  }>> {
+    try {
+      const data = await invoke<any>('api_download_blob', { blobUrl });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Send bulk wrapped keys to multiple users
@@ -124,37 +142,41 @@ class APIClient {
     total_sent: number;
     total_failed: number;
   }>> {
-    return this.request('/messages/send-bulk', {
-      method: 'POST',
-      body: JSON.stringify({
-        file_id: fileId,
-        group_id: groupId,
-        wrapped_keys: wrappedKeys,
-      }),
-    });
+    try {
+      const data = await invoke<any>('api_send_bulk_wrapped_keys', {
+        fileId,
+        groupId,
+        wrappedKeys
+      });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Group operations
   async createGroup(request: GroupCreateRequest): Promise<APIResponse<Group>> {
-    return this.request('/groups', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
+    try {
+      const data = await invoke<any>('api_create_group', {
+        name: request.name,
+        creatorId: request.creator_id
+      });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   async addGroupMember(groupId: string, request: GroupMemberRequest): Promise<APIResponse<any>> {
-    return this.request(`/groups/${groupId}/members`, {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  // File operations
-  async shareFile(groupId: string, request: FileShareRequest): Promise<APIResponse<SharedFile>> {
-    return this.request(`/groups/${groupId}/files`, {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
+    try {
+      const data = await invoke<any>('api_add_group_member', {
+        groupId,
+        userId: request.user_id
+      });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Share file metadata only (zero-knowledge)
@@ -167,38 +189,40 @@ class APIClient {
     blob_hash: string;
     description?: string;
   }): Promise<APIResponse<SharedFile>> {
-    return this.request(`/groups/${groupId}/files`, {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
+    try {
+      const data = await invoke<any>('api_share_file_metadata', {
+        groupId,
+        originalName: request.original_name,
+        size: request.size,
+        mimeType: request.mime_type,
+        sharedBy: request.shared_by,
+        blobUrl: request.blob_url,
+        blobHash: request.blob_hash,
+        description: request.description,
+      });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   async getGroupFiles(groupId: string): Promise<APIResponse<{ group_id: string; files: SharedFile[] }>> {
-    return this.request(`/groups/${groupId}/files`);
+    try {
+      const data = await invoke<any>('api_get_group_files', { groupId });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Get public key bundles for multiple users
   async getPublicKeyBundles(userIds: string[]): Promise<APIResponse<{ public_key_bundles: PublicKeyBundleResponse[] }>> {
-    return this.request('/public-key-bundles', {
-      method: 'POST',
-      body: JSON.stringify({ user_ids: userIds }),
-    });
-  }
-
-  // Add wrapped keys for a new group member
-  async addWrappedKeysForNewMember(groupId: string, userId: string, wrappedKeys: Record<string, WrappedKey>): Promise<APIResponse<any>> {
-    return this.request(`/groups/${groupId}/wrapped-keys`, {
-      method: 'POST',
-      body: JSON.stringify({
-        user_id: userId,
-        wrapped_keys: wrappedKeys,
-      }),
-    });
-  }
-
-  // Get file content and wrapped key for a user
-  async getFileContent(fileId: string, userId: string): Promise<APIResponse<FileContentResponse>> {
-    return this.request(`/files/${fileId}/content?user_id=${encodeURIComponent(userId)}`);
+    try {
+      const data = await invoke<any>('api_get_public_key_bundles', { userIds });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Get user's message queue
@@ -207,19 +231,12 @@ class APIClient {
     messages: any[];
     count: number;
   }>> {
-    return this.request(`/users/${userId}/messages`);
-  }
-
-  // Download encrypted blob from storage
-  async downloadBlob(blobUrl: string): Promise<APIResponse<{
-    blob_id: string;
-    encrypted_content: string;
-    blob_hash: string;
-    size: number;
-  }>> {
-    // Extract blob ID from URL (e.g., "/blobs/abc123" -> "abc123")
-    const blobId = blobUrl.split('/').pop();
-    return this.request(`/blobs/${blobId}`);
+    try {
+      const data = await invoke<any>('api_get_user_messages', { userId });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 
   // Mark message as processed
@@ -227,9 +244,12 @@ class APIClient {
     message_id: string;
     processed: boolean;
   }>> {
-    return this.request(`/messages/${messageId}/processed`, {
-      method: 'PATCH',
-    });
+    try {
+      const data = await invoke<any>('api_mark_message_processed', { messageId });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error as string };
+    }
   }
 }
 
@@ -247,37 +267,14 @@ export const api = {
     }
   },
 
-  // Register a new user
-  async register(username: string, password: string, keyBundle: any): Promise<{ success: boolean; user?: User; error?: string }> {
-    const response = await apiClient.registerUser({
-      username,
-      password,
-      key_bundle: keyBundle,
-    });
-
-    if (response.success && response.data) {
-      return { success: true, user: response.data };
-    }
-
-    return { success: false, error: response.error };
+  // Register a new user - now uses auth API
+  async register(username: string, password: string, _keyBundle: any): Promise<{ success: boolean; user?: User; error?: string }> {
+    return authApi.register(username, password);
   },
 
-  // Login a user
+  // Login a user - now uses auth API
   async login(username: string, password: string): Promise<{ success: boolean; user?: User; groups?: Group[]; error?: string }> {
-    const response = await apiClient.loginUser({
-      username,
-      password,
-    });
-
-    if (response.success && response.data) {
-      return {
-        success: true,
-        user: response.data.user,
-        groups: response.data.groups
-      };
-    }
-
-    return { success: false, error: response.error };
+    return authApi.login(username, password);
   },
 
   // Get user by username
@@ -402,31 +399,36 @@ export const api = {
   },
 
   // Share a file in a group with wrapped master keys
+  // Note: This method is deprecated in favor of separate blob upload and metadata sharing
   async shareFile(
     groupId: string,
     file: File,
     encryptedContent: string,
-    wrappedMasterKeys: Record<string, WrappedKey>,
-    encryptionMetadata: any,
+    _wrappedMasterKeys: Record<string, WrappedKey>,
+    _encryptionMetadata: any,
     sharedBy: string
   ): Promise<{ success: boolean; file?: SharedFile; error?: string }> {
-    const request: FileShareRequest = {
+    // First upload the blob
+    const blobResponse = await this.uploadBlob(encryptedContent);
+    if (!blobResponse.success || !blobResponse.data) {
+      return { success: false, error: blobResponse.error || 'Blob upload failed' };
+    }
+
+    // Then share the metadata
+    const metadataResponse = await apiClient.shareFileMetadata(groupId, {
       original_name: file.name,
       size: file.size,
       mime_type: file.type || 'application/octet-stream',
       shared_by: sharedBy,
-      encrypted_content: encryptedContent,
-      wrapped_master_keys: wrappedMasterKeys,
-      encryption_metadata: encryptionMetadata,
-    };
+      blob_url: blobResponse.data.blob_url,
+      blob_hash: blobResponse.data.blob_hash,
+    });
 
-    const response = await apiClient.shareFile(groupId, request);
-
-    if (response.success && response.data) {
-      return { success: true, file: response.data };
+    if (metadataResponse.success && metadataResponse.data) {
+      return { success: true, file: metadataResponse.data };
     }
 
-    return { success: false, error: response.error };
+    return { success: false, error: metadataResponse.error };
   },
 
   // Get public key bundles for users
@@ -441,29 +443,21 @@ export const api = {
   },
 
   // Add wrapped keys for a new group member
+  // Note: This functionality needs to be implemented through the new API proxy commands
   async addWrappedKeysForNewMember(
-    groupId: string,
-    userId: string,
-    wrappedKeys: Record<string, WrappedKey>
+    _groupId: string,
+    _userId: string,
+    _wrappedKeys: Record<string, WrappedKey>
   ): Promise<{ success: boolean; error?: string }> {
-    const response = await apiClient.addWrappedKeysForNewMember(groupId, userId, wrappedKeys);
-
-    if (response.success) {
-      return { success: true };
-    }
-
-    return { success: false, error: response.error };
+    // TODO: Implement this through Tauri commands when the Go API endpoint is available
+    return { success: false, error: "Not yet implemented through Tauri commands" };
   },
 
   // Get file content and wrapped key for download
-  async getFileContent(fileId: string, userId: string): Promise<{ success: boolean; content?: FileContentResponse; error?: string }> {
-    const response = await apiClient.getFileContent(fileId, userId);
-
-    if (response.success && response.data) {
-      return { success: true, content: response.data };
-    }
-
-    return { success: false, error: response.error };
+  // Note: This functionality needs to be implemented through the new API proxy commands
+  async getFileContent(_fileId: string, _userId: string): Promise<{ success: boolean; content?: FileContentResponse; error?: string }> {
+    // TODO: Implement this through Tauri commands when the Go API endpoint is available
+    return { success: false, error: "Not yet implemented through Tauri commands" };
   },
 
   // Get files in a group

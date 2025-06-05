@@ -6,6 +6,7 @@ pub mod demo;
 pub mod config;
 pub mod vault;
 pub mod webdav;
+pub mod auth;
 
 // Re-export user types
 pub use user::{
@@ -46,4 +47,12 @@ pub use webdav::{
     WebDavConfig, VaultStatus, VaultMount, UnlockVaultRequest,
     UnlockVaultResponse, LockVaultResponse,
     WebDavState
+};
+
+// Re-export auth types
+pub use auth::{
+    AuthUser, UserSession, RegisterRequest, LoginRequest,
+    RegisterResponse, LoginResponse, ApiUser, ApiGroup,
+    ApiPublicKeyBundle, ApiRegisterRequest, ApiLoginRequest,
+    PendingMessage, UserMessagesResponse
 };

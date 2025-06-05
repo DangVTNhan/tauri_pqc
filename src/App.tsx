@@ -6,7 +6,7 @@ import { Toaster } from "sonner";
 import { E2EEGroupSharing } from "./components/E2EEGroupSharing";
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'sharing' | 'test' | 'config'>('test');
+  const [activeTab, setActiveTab] = useState<'sharing' | 'config'>('sharing');
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -17,7 +17,7 @@ function App() {
               variant={activeTab === 'sharing' ? "default" : "outline"}
               onClick={() => setActiveTab('sharing')}
             >
-              E2EE Group Sharing
+              Group File Sharing
             </Button>
             {/* <Button
               variant={activeTab === 'test' ? "default" : "outline"}
@@ -29,7 +29,7 @@ function App() {
               variant={activeTab === 'config' ? "default" : "outline"}
               onClick={() => setActiveTab('config')}
             >
-              Config Demo
+              My Vault
             </Button>
           </div>
         </div>

@@ -3,3 +3,31 @@ This system should has high security standard and high performance
 We dont need to write test on the fontend but we want high test coverage for the Rust backend function
 Only one README.md in the root directory be be kept don't create too many README.
 This is end to end encryption project so there must be NO decryption key stored on the server (Go backend). The main purpose of Go backend is only for storing encrypted content, public key bundle, metadata, and message queue act as an inbox for wrapped keys.
+
+Flow register:
+- Enter username, password then route from tauri frontend to backend
+- tauri backend take user info, generate key bundle then store user info, private keys to local database (in memory in dev mode, sql with AES in prd mode). Use argon2 to hash user password. DB should be provision such that multiple user can run this app on the same machine
+- tauri backend send public information about user to API backend service (Go backend)
+- If ok let them in, other wise rollback tx
+
+Flow login:
+- User enter username, password send to tauri backend
+- tauri backend decrypt encrypted data using user passphrase to check for info
+- if valid tauri backend will fetch pending data from API service (key exchange request, adding user to a group request. file sharing request) then stored it to local db
+- return ok then route user to dashboard
+
+Flow Share file:
+- Sender generate a random master key (32 bytes, this should use secure random generator)
+- Use generated master key to encrypt file
+- Send encrypted file to a blob storage (S3) then get the url to that resource
+- Fetch all member key bundle in that group
+- Perform key exchange with each member, one by one to derived a shard key between each member
+- Loop though each exchanged key, encrypt (wrap) the following object: 
+{
+url: “https://…”
+masterKey: “somerandomkey”
+}
+- send that wrap key to each member (incase of file sharing, each member should have a “queue” for their inbox)
+- Each member when logged in, fetch their inbox “queue” then stored those wrap key in their local store (doesn’t necessary to be fetch immediately can pending when they want to decrypt file)
+- Each member use their private key (associated with pre-key bundle that they send to server) to decrypt the wrap masterKey
+- Fetch blog file using decrypted url then use masterKey to decrypt data

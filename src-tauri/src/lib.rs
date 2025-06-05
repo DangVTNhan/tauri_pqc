@@ -11,6 +11,8 @@ mod store;
 mod config;
 mod vault;
 mod webdav;
+mod http;
+mod auth;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +28,10 @@ pub fn run() {
             // Initialize WebDAV system
             let webdav_state = webdav::commands::WebDavCommandState::new();
             app.manage(webdav_state);
+
+            // Initialize authentication system
+            let auth_state = auth::commands::AuthState::new();
+            app.manage(auth_state);
 
             Ok(())
         })
@@ -50,6 +56,27 @@ pub fn run() {
             commands::kyber_decapsulate,
             commands::derive_shared_secret,
             commands::generate_random_bytes,
+            // API proxy commands
+            commands::api_health_check,
+            commands::api_upload_blob,
+            commands::api_download_blob,
+            commands::api_create_group,
+            commands::api_add_group_member,
+            commands::api_get_public_key_bundles,
+            commands::api_send_bulk_wrapped_keys,
+            commands::api_share_file_metadata,
+            commands::api_get_group_files,
+            commands::api_get_user_by_username,
+            commands::api_get_user_messages,
+            commands::api_mark_message_processed,
+            // Authentication commands
+            auth::commands::auth_register,
+            auth::commands::auth_login,
+            auth::commands::auth_logout,
+            auth::commands::auth_is_logged_in,
+            auth::commands::auth_get_current_session,
+            auth::commands::auth_get_current_user,
+            auth::commands::auth_cleanup_sessions,
             // Configuration commands
             config::commands::load_config,
             config::commands::save_config,

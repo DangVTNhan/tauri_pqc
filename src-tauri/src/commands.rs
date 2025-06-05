@@ -879,6 +879,253 @@ pub struct KyberEncapsulationResult {
     pub shared_secret: String,
 }
 
+// API proxy commands for Go backend communication
+use crate::http::ApiClient;
+use serde_json::Value;
+use base64::Engine;
+use sha2::Digest;
+
+/// Health check for Go API backend
+#[tauri::command]
+pub async fn api_health_check() -> Result<Value, String> {
+    let client = ApiClient::default();
+    let response = client.health_check().await
+        .map_err(|e| format!("Health check failed: {}", e))?;
+
+    if response.success {
+        Ok(serde_json::to_value(response.data).unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Health check failed".to_string()))
+    }
+}
+
+/// Upload encrypted blob to storage
+#[tauri::command]
+pub async fn api_upload_blob(encrypted_content: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    // Calculate hash of the base64-decoded binary data
+    let binary_data = base64::engine::general_purpose::STANDARD
+        .decode(&encrypted_content)
+        .map_err(|e| format!("Failed to decode base64 content: {}", e))?;
+
+    let hash_bytes = sha2::Sha256::digest(&binary_data);
+    let hash_hex = hex::encode(hash_bytes);
+
+    let request_body = serde_json::json!({
+        "encrypted_content": encrypted_content,
+        "blob_hash": hash_hex,
+    });
+
+    let response = client.post::<Value, _>("/blobs/upload", &request_body).await
+        .map_err(|e| format!("Blob upload failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Blob upload failed".to_string()))
+    }
+}
+
+/// Download encrypted blob from storage
+#[tauri::command]
+pub async fn api_download_blob(blob_url: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    // Extract blob ID from URL
+    let blob_id = blob_url.split('/').last()
+        .ok_or_else(|| "Invalid blob URL".to_string())?;
+
+    let response = client.get::<Value>(&format!("/blobs/{}", blob_id)).await
+        .map_err(|e| format!("Blob download failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Blob download failed".to_string()))
+    }
+}
+
+/// Create a new group
+#[tauri::command]
+pub async fn api_create_group(name: String, creator_id: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let request_body = serde_json::json!({
+        "name": name,
+        "creator_id": creator_id,
+    });
+
+    let response = client.post::<Value, _>("/groups", &request_body).await
+        .map_err(|e| format!("Group creation failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Group creation failed".to_string()))
+    }
+}
+
+/// Add member to group
+#[tauri::command]
+pub async fn api_add_group_member(group_id: String, user_id: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let request_body = serde_json::json!({
+        "user_id": user_id,
+    });
+
+    let response = client.post::<Value, _>(&format!("/groups/{}/members", group_id), &request_body).await
+        .map_err(|e| format!("Add group member failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Add group member failed".to_string()))
+    }
+}
+
+/// Get public key bundles for multiple users
+#[tauri::command]
+pub async fn api_get_public_key_bundles(user_ids: Vec<String>) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let request_body = serde_json::json!({
+        "user_ids": user_ids,
+    });
+
+    let response = client.post::<Value, _>("/public-key-bundles", &request_body).await
+        .map_err(|e| format!("Get public key bundles failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Get public key bundles failed".to_string()))
+    }
+}
+
+/// Send bulk wrapped keys to multiple users
+#[tauri::command]
+pub async fn api_send_bulk_wrapped_keys(
+    file_id: String,
+    group_id: String,
+    wrapped_keys: Value,
+) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let request_body = serde_json::json!({
+        "file_id": file_id,
+        "group_id": group_id,
+        "wrapped_keys": wrapped_keys,
+    });
+
+    let response = client.post::<Value, _>("/messages/send-bulk", &request_body).await
+        .map_err(|e| format!("Send bulk wrapped keys failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Send bulk wrapped keys failed".to_string()))
+    }
+}
+
+/// Share file metadata only (zero-knowledge)
+#[tauri::command]
+pub async fn api_share_file_metadata(
+    group_id: String,
+    original_name: String,
+    size: u64,
+    mime_type: String,
+    shared_by: String,
+    blob_url: String,
+    blob_hash: String,
+    description: Option<String>,
+) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let mut request_body = serde_json::json!({
+        "original_name": original_name,
+        "size": size,
+        "mime_type": mime_type,
+        "shared_by": shared_by,
+        "blob_url": blob_url,
+        "blob_hash": blob_hash,
+    });
+
+    if let Some(desc) = description {
+        request_body["description"] = serde_json::Value::String(desc);
+    }
+
+    let response = client.post::<Value, _>(&format!("/groups/{}/files", group_id), &request_body).await
+        .map_err(|e| format!("Share file metadata failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Share file metadata failed".to_string()))
+    }
+}
+
+/// Get files in a group
+#[tauri::command]
+pub async fn api_get_group_files(group_id: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let response = client.get::<Value>(&format!("/groups/{}/files", group_id)).await
+        .map_err(|e| format!("Get group files failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Get group files failed".to_string()))
+    }
+}
+
+/// Get user by username
+#[tauri::command]
+pub async fn api_get_user_by_username(username: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let response = client.get::<Value>(&format!("/users/by-username/{}", urlencoding::encode(&username))).await
+        .map_err(|e| format!("Get user by username failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Get user by username failed".to_string()))
+    }
+}
+
+/// Get user's message queue
+#[tauri::command]
+pub async fn api_get_user_messages(user_id: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let response = client.get::<Value>(&format!("/users/{}/messages", user_id)).await
+        .map_err(|e| format!("Get user messages failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Get user messages failed".to_string()))
+    }
+}
+
+/// Mark message as processed
+#[tauri::command]
+pub async fn api_mark_message_processed(message_id: String) -> Result<Value, String> {
+    let client = ApiClient::default();
+
+    let response = client.patch::<Value, _>(&format!("/messages/{}/processed", message_id), &serde_json::json!({})).await
+        .map_err(|e| format!("Mark message processed failed: {}", e))?;
+
+    if response.success {
+        Ok(response.data.unwrap_or(Value::Null))
+    } else {
+        Err(response.error.unwrap_or_else(|| "Mark message processed failed".to_string()))
+    }
+}
+
 /// Open already-mounted WebDAV volume in Finder
 #[tauri::command]
 pub async fn open_url(_url: String, vault_name: Option<String>) -> Result<(), String> {

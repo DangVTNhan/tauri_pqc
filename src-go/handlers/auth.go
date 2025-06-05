@@ -41,13 +41,8 @@ func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := utils.ValidatePassword(req.Password); err != nil {
-		utils.WriteBadRequestResponse(w, err.Error())
-		return
-	}
-
-	// Validate key bundle
-	if err := h.validateKeyBundle(req.KeyBundle); err != nil {
+	// Validate public key bundle
+	if err := h.validatePublicKeyBundle(req.PublicKeyBundle); err != nil {
 		utils.WriteBadRequestResponse(w, err.Error())
 		return
 	}
@@ -58,11 +53,8 @@ func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hash password
-	passwordHash := utils.HashPassword(req.Password)
-
-	// Create new user
-	user := models.NewUser(req.Username, passwordHash, req.KeyBundle)
+	// Create new user (SECURITY: Only store public key bundle)
+	user := models.NewUser(req.Username, req.PublicKeyBundle)
 
 	// Store user
 	if err := h.storage.CreateUser(user); err != nil {
@@ -70,11 +62,15 @@ func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success response
-	utils.WriteCreatedResponse(w, user.ToResponse())
+	// Return success response with user wrapped in response object
+	response := map[string]interface{}{
+		"user": user.ToResponse(),
+	}
+	utils.WriteCreatedResponse(w, response)
 }
 
 // LoginUser handles user login
+// SECURITY: No password verification - authentication is done client-side
 func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		utils.WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -83,7 +79,6 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Username string `json:"username"`
-		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.WriteBadRequestResponse(w, "Invalid JSON payload")
@@ -96,21 +91,10 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Password == "" {
-		utils.WriteBadRequestResponse(w, "Password is required")
-		return
-	}
-
 	// Get user by username
 	user, err := h.storage.GetUserByUsername(req.Username)
 	if err != nil {
-		utils.WriteUnauthorizedResponse(w, "Invalid username or password")
-		return
-	}
-
-	// Verify password
-	if !utils.VerifyPassword(req.Password, user.PasswordHash) {
-		utils.WriteUnauthorizedResponse(w, "Invalid username or password")
+		utils.WriteNotFoundResponse(w, "User not found")
 		return
 	}
 
@@ -154,69 +138,32 @@ func (h *AuthHandler) GetUserByUsername(w http.ResponseWriter, r *http.Request) 
 	utils.WriteSuccessResponse(w, user.ToResponse())
 }
 
-// validateKeyBundle validates the E2EE key bundle
-func (h *AuthHandler) validateKeyBundle(keyBundle models.KeyBundle) error {
+// validatePublicKeyBundle validates the public key bundle
+// SECURITY: Only validates public keys - never accepts private keys
+func (h *AuthHandler) validatePublicKeyBundle(publicKeys models.PublicKeyBundle) error {
 	// Validate public keys
-	if len(keyBundle.PublicKeys.IdentityKey) == 0 {
+	if len(publicKeys.IdentityKey) == 0 {
 		return utils.NewValidationError("public identity key cannot be empty")
 	}
 
-	if len(keyBundle.PublicKeys.SignedPreKey) == 0 {
+	if len(publicKeys.SignedPreKey) == 0 {
 		return utils.NewValidationError("public signed pre-key cannot be empty")
 	}
 
-	if len(keyBundle.PublicKeys.KyberPreKey) == 0 {
+	if len(publicKeys.KyberPreKey) == 0 {
 		return utils.NewValidationError("public kyber pre-key cannot be empty")
 	}
 
-	if len(keyBundle.PublicKeys.OneTimePreKeys) == 0 {
+	if len(publicKeys.OneTimePreKeys) == 0 {
 		return utils.NewValidationError("at least one public one-time pre-key is required")
 	}
 
-	if len(keyBundle.PublicKeys.Signature) == 0 {
+	if len(publicKeys.Signature) == 0 {
 		return utils.NewValidationError("signature cannot be empty")
 	}
 
-	// Validate private keys
-	if len(keyBundle.PrivateKeys.IdentityKey) == 0 {
-		return utils.NewValidationError("private identity key cannot be empty")
-	}
-
-	if len(keyBundle.PrivateKeys.SignedPreKey) == 0 {
-		return utils.NewValidationError("private signed pre-key cannot be empty")
-	}
-
-	if len(keyBundle.PrivateKeys.KyberPreKey) == 0 {
-		return utils.NewValidationError("private kyber pre-key cannot be empty")
-	}
-
-	if len(keyBundle.PrivateKeys.OneTimePreKeys) == 0 {
-		return utils.NewValidationError("at least one private one-time pre-key is required")
-	}
-
-	if len(keyBundle.PrivateKeys.Salt) == 0 {
-		return utils.NewValidationError("salt cannot be empty")
-	}
-
-	// Validate individual nonces for each private key
-	if len(keyBundle.PrivateKeys.IdentityKeyNonce) == 0 {
-		return utils.NewValidationError("identity key nonce cannot be empty")
-	}
-
-	if len(keyBundle.PrivateKeys.SignedPreKeyNonce) == 0 {
-		return utils.NewValidationError("signed pre-key nonce cannot be empty")
-	}
-
-	if len(keyBundle.PrivateKeys.KyberPreKeyNonce) == 0 {
-		return utils.NewValidationError("kyber pre-key nonce cannot be empty")
-	}
-
-	if len(keyBundle.PrivateKeys.OneTimePreKeysNonces) == 0 {
-		return utils.NewValidationError("at least one one-time pre-key nonce is required")
-	}
-
 	// Additional validation could include:
-	// - Key length validation
+	// - Key length validation (Ed25519: 32 bytes, X25519: 32 bytes, Kyber-768: 1184 bytes)
 	// - Signature verification
 	// - Key format validation
 

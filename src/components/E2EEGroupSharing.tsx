@@ -330,7 +330,6 @@ export function E2EEGroupSharing() {
 
     try {
       toast.info('Downloading and decrypting file...');
-
       // Step 1: Get user's message queue to find wrapped keys for this file
       const messagesResult = await api.getUserMessages(user.id);
       if (!messagesResult.success || !messagesResult.data) {
