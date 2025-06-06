@@ -218,9 +218,34 @@ func (h *GroupHandler) AddWrappedKeysForNewMember(w http.ResponseWriter, r *http
 	})
 }
 
+// GetGroup handles retrieving a single group by ID
+func (h *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Extract group ID from URL path
+	groupID := h.extractGroupIDFromPath(r.URL.Path)
+	if groupID == "" {
+		utils.WriteBadRequestResponse(w, "Invalid group ID in URL")
+		return
+	}
+
+	// Get group
+	group, err := h.storage.GetGroup(groupID)
+	if err != nil {
+		utils.WriteNotFoundResponse(w, "Group not found")
+		return
+	}
+
+	// Return group information
+	utils.WriteSuccessResponse(w, group.ToResponse())
+}
+
 // extractGroupIDFromPath extracts the group ID from URL paths like /groups/{groupId}/members
 func (h *GroupHandler) extractGroupIDFromPath(path string) string {
-	// Expected format: /groups/{groupId}/members or /groups/{groupId}/files
+	// Expected format: /groups/{groupId}/members, /groups/{groupId}/files, or /groups/{groupId}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) >= 2 && parts[0] == "groups" {
 		return parts[1]

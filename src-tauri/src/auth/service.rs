@@ -4,6 +4,7 @@ use crate::store::auth::AuthStorage;
 use crate::commands::generate_key_bundle;
 use base64::Engine;
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::RwLock;
 
 /// Authentication service that manages user registration, login, and session management
@@ -15,13 +16,25 @@ pub struct AuthService {
 }
 
 impl AuthService {
-    /// Create a new authentication service
+    /// Create a new authentication service with in-memory storage
     pub fn new() -> Self {
         Self {
             auth_storage: AuthStorage::new(),
             api_client: ApiClient::default(),
             current_session: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Create a new authentication service with encrypted SQLite persistence
+    pub async fn with_sqlite_persistence(db_path: PathBuf, master_password: &str) -> Result<Self, String> {
+        let auth_storage = AuthStorage::with_sqlite_persistence(db_path, master_password).await
+            .map_err(|e| format!("Failed to initialize SQLite auth storage: {}", e))?;
+
+        Ok(Self {
+            auth_storage,
+            api_client: ApiClient::default(),
+            current_session: Arc::new(RwLock::new(None)),
+        })
     }
 
     /// Register a new user

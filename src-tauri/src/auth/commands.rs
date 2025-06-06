@@ -1,7 +1,8 @@
 use crate::auth::service::AuthService;
 use crate::models::auth::*;
-use tauri::State;
+use tauri::{State, AppHandle, Manager};
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::RwLock;
 
 /// Authentication state for Tauri commands
@@ -16,6 +17,40 @@ impl AuthState {
             service: Arc::new(RwLock::new(AuthService::new())),
         }
     }
+
+    /// Initialize SQLite persistence for the auth service
+    pub async fn init_sqlite_persistence(&self, db_path: PathBuf, master_password: &str) -> Result<(), String> {
+        let new_service = AuthService::with_sqlite_persistence(db_path, master_password).await?;
+
+        // Replace the service with the persistent one
+        {
+            let mut service = self.service.write().await;
+            *service = new_service;
+        }
+
+        Ok(())
+    }
+}
+
+/// Initialize SQLite persistence for authentication
+#[tauri::command]
+pub async fn auth_init_persistence(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AuthState>,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    // Get app data directory
+    let app_data_dir = app_handle.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+
+    // Create auth database path
+    let auth_db_path = app_data_dir.join("auth.db");
+
+    // Use a default master password for auth storage encryption
+    let master_password = "auth_storage_master_key_2024";
+
+    state.init_sqlite_persistence(auth_db_path, master_password).await
 }
 
 /// Register a new user
@@ -23,8 +58,12 @@ impl AuthState {
 pub async fn auth_register(
     username: String,
     password: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AuthState>,
 ) -> Result<RegisterResponse, String> {
+    // Initialize persistence if not already done
+    let _ = auth_init_persistence(app_handle, state.clone()).await;
+
     let service = state.service.read().await;
     service.register_user(username, password).await
 }
@@ -34,8 +73,12 @@ pub async fn auth_register(
 pub async fn auth_login(
     username: String,
     password: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AuthState>,
 ) -> Result<LoginResponse, String> {
+    // Initialize persistence if not already done
+    let _ = auth_init_persistence(app_handle, state.clone()).await;
+
     let service = state.service.read().await;
     service.login_user(username, password).await
 }

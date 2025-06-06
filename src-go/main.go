@@ -50,6 +50,12 @@ func main() {
 			return
 		}
 
+		// Check if it's a single group GET request (e.g., /groups/{groupId})
+		if r.Method == http.MethodGet && !containsPath(r.URL.Path, "/members") && !containsPath(r.URL.Path, "/files") && !containsPath(r.URL.Path, "/wrapped-keys") {
+			groupHandler.GetGroup(w, r)
+			return
+		}
+
 		// Check if it's a member addition request
 		if r.Method == http.MethodPost && containsPath(r.URL.Path, "/members") {
 			groupHandler.AddMember(w, r)
@@ -154,6 +160,7 @@ func main() {
 	fmt.Printf("   GET  /users/{userId}/messages/unprocessed - Get unprocessed messages\n")
 	fmt.Printf("   POST /public-key-bundles               - Get public key bundles\n")
 	fmt.Printf("   POST /groups                           - Create new group\n")
+	fmt.Printf("   GET  /groups/{groupId}                 - Get group information\n")
 	fmt.Printf("   POST /groups/{groupId}/members         - Add member to group\n")
 	fmt.Printf("   POST /groups/{groupId}/wrapped-keys    - Add wrapped keys for new member\n")
 	fmt.Printf("   POST /groups/{groupId}/files           - Share file metadata in group\n")

@@ -289,7 +289,9 @@ export const api = {
   },
 
   // Upload encrypted blob to storage
+  // DEPRECATED: Use e2ee_share_file_with_group Tauri command instead for E2EE file sharing
   async uploadBlob(encryptedContent: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    console.warn('DEPRECATED: uploadBlob should not be called directly. Use e2ee_share_file_with_group Tauri command instead.');
     const response = await apiClient.uploadBlob(encryptedContent);
 
     if (response.success && response.data) {
@@ -300,11 +302,13 @@ export const api = {
   },
 
   // Send bulk wrapped keys to multiple users
+  // DEPRECATED: Use e2ee_share_file_with_group Tauri command instead for E2EE file sharing
   async sendBulkWrappedKeys(
     fileId: string,
     groupId: string,
     wrappedKeys: Record<string, WrappedKey>
   ): Promise<{ success: boolean; data?: any; error?: string }> {
+    console.warn('DEPRECATED: sendBulkWrappedKeys should not be called directly. Use e2ee_share_file_with_group Tauri command instead.');
     const response = await apiClient.sendBulkWrappedKeys(fileId, groupId, wrappedKeys);
 
     if (response.success && response.data) {
@@ -315,6 +319,7 @@ export const api = {
   },
 
   // Share file metadata only (zero-knowledge)
+  // DEPRECATED: Use e2ee_share_file_with_group Tauri command instead for E2EE file sharing
   async shareFileMetadata(
     groupId: string,
     file: File,
@@ -322,6 +327,7 @@ export const api = {
     blobHash: string,
     sharedBy: string
   ): Promise<{ success: boolean; file?: SharedFile; error?: string }> {
+    console.warn('DEPRECATED: shareFileMetadata should not be called directly. Use e2ee_share_file_with_group Tauri command instead.');
     const request = {
       original_name: file.name,
       size: file.size,
@@ -341,7 +347,9 @@ export const api = {
   },
 
   // Get user's message queue
+  // DEPRECATED: Use e2ee_download_and_decrypt_file Tauri command instead for E2EE file download
   async getUserMessages(userId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    console.warn('DEPRECATED: getUserMessages should not be called directly. Use e2ee_download_and_decrypt_file Tauri command instead.');
     const response = await apiClient.getUserMessages(userId);
 
     if (response.success && response.data) {
@@ -352,7 +360,9 @@ export const api = {
   },
 
   // Download encrypted blob from storage
+  // DEPRECATED: Use e2ee_download_and_decrypt_file Tauri command instead for E2EE file download
   async downloadBlob(blobUrl: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    console.warn('DEPRECATED: downloadBlob should not be called directly. Use e2ee_download_and_decrypt_file Tauri command instead.');
     const response = await apiClient.downloadBlob(blobUrl);
 
     if (response.success && response.data) {
@@ -363,7 +373,9 @@ export const api = {
   },
 
   // Mark message as processed
+  // DEPRECATED: Use e2ee_download_and_decrypt_file Tauri command instead for E2EE file download
   async markMessageProcessed(messageId: string): Promise<{ success: boolean; error?: string }> {
+    console.warn('DEPRECATED: markMessageProcessed should not be called directly. Use e2ee_download_and_decrypt_file Tauri command instead.');
     const response = await apiClient.markMessageProcessed(messageId);
 
     if (response.success) {
@@ -432,7 +444,9 @@ export const api = {
   },
 
   // Get public key bundles for users
+  // DEPRECATED: Use e2ee_share_file_with_group Tauri command instead for E2EE file sharing
   async getPublicKeyBundles(userIds: string[]): Promise<{ success: boolean; bundles?: PublicKeyBundleResponse[]; error?: string }> {
+    console.warn('DEPRECATED: getPublicKeyBundles should not be called directly. Use e2ee_share_file_with_group Tauri command instead.');
     const response = await apiClient.getPublicKeyBundles(userIds);
 
     if (response.success && response.data) {

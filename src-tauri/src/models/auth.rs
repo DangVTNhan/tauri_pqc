@@ -8,14 +8,14 @@ pub struct AuthUser {
     pub id: Uuid,
     pub username: String,
     pub password_hash: String,
-    pub salt: Vec<u8>,
+    pub salt: String,
     pub created_at: DateTime<Utc>,
     pub last_login: Option<DateTime<Utc>>,
     pub is_active: bool,
 }
 
 impl AuthUser {
-    pub fn new(username: String, password_hash: String, salt: Vec<u8>) -> Self {
+    pub fn new(username: String, password_hash: String, salt: String) -> Self {
         Self {
             id: Uuid::new_v4(),
             username,

@@ -14,6 +14,9 @@ mod webdav;
 mod http;
 mod auth;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -61,6 +64,7 @@ pub fn run() {
             commands::api_upload_blob,
             commands::api_download_blob,
             commands::api_create_group,
+            commands::api_get_group,
             commands::api_add_group_member,
             commands::api_get_public_key_bundles,
             commands::api_send_bulk_wrapped_keys,
@@ -69,7 +73,12 @@ pub fn run() {
             commands::api_get_user_by_username,
             commands::api_get_user_messages,
             commands::api_mark_message_processed,
+            // E2EE file sharing commands
+            commands::e2ee_share_file_with_group,
+            commands::e2ee_download_and_decrypt_file,
+            commands::get_user_private_keys,
             // Authentication commands
+            auth::commands::auth_init_persistence,
             auth::commands::auth_register,
             auth::commands::auth_login,
             auth::commands::auth_logout,

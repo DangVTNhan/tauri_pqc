@@ -10,19 +10,35 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use chrono;
+    use tempfile::TempDir;
+    use std::path::PathBuf;
+
+    /// Helper function to create a test AuthStorage with SQLite persistence
+    async fn create_test_auth_storage() -> (AuthStorage, TempDir) {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let db_path = temp_dir.path().join("test_auth.db");
+        let master_password = "test_master_password_2024";
+
+        let auth_storage = AuthStorage::with_sqlite_persistence(db_path, master_password).await
+            .expect("Failed to create SQLite auth storage");
+
+        (auth_storage, temp_dir)
+    }
 
     /// Mock AuthService for testing that doesn't make HTTP requests
-    #[derive(Clone)]
     struct MockAuthService {
         auth_storage: AuthStorage,
         current_session: Arc<RwLock<Option<UserSession>>>,
+        _temp_dir: TempDir, // Keep temp directory alive
     }
 
     impl MockAuthService {
-        fn new() -> Self {
+        async fn new() -> Self {
+            let (auth_storage, temp_dir) = create_test_auth_storage().await;
             Self {
-                auth_storage: AuthStorage::new(),
+                auth_storage,
                 current_session: Arc::new(RwLock::new(None)),
+                _temp_dir: temp_dir,
             }
         }
 
@@ -155,7 +171,7 @@ mod tests {
     async fn test_auth_service_register_flow() {
         println!("🧪 Testing AuthService register flow with real key generation");
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
         
         // Test successful registration
         let result = auth_service.register_user(
@@ -188,7 +204,7 @@ mod tests {
     async fn test_auth_service_login_flow() {
         println!("🧪 Testing AuthService login flow with real key generation");
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
         
         // First register a user
         let register_result = auth_service.register_user(
@@ -249,7 +265,7 @@ mod tests {
     async fn test_auth_service_session_management() {
         println!("🧪 Testing AuthService session management");
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
         
         // Register and login user
         auth_service.register_user(
@@ -295,7 +311,7 @@ mod tests {
         // Note: We test the service directly since Tauri State requires a full Tauri app context
         // This tests the same logic that the Tauri commands would use
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
 
         // Test register flow (equivalent to auth_register command)
         println!("📝 Testing register flow...");
@@ -402,7 +418,7 @@ mod tests {
         println!("   - One-time pre-keys: {} keys", key_bundle.public_keys.one_time_pre_keys.len());
         
         // Now test registration with real key generation
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
         let register_result = auth_service.register_user(
             "key_gen_test_user".to_string(),
             "KeyGenTestPass123!".to_string()
@@ -416,7 +432,7 @@ mod tests {
     async fn test_complete_authentication_workflow() {
         println!("🧪 Testing complete authentication workflow (register -> login -> operations -> logout)");
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
         let test_username = "workflow_test_user";
         let test_password = "WorkflowTestPass123!";
 
@@ -490,7 +506,7 @@ mod tests {
     async fn test_multiple_users_authentication() {
         println!("🧪 Testing multiple users authentication (isolation test)");
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
 
         // Register multiple users
         let users = vec![
@@ -558,7 +574,7 @@ mod tests {
     async fn test_password_security_and_key_generation() {
         println!("🧪 Testing password security and key generation");
 
-        let auth_service = MockAuthService::new();
+        let auth_service = MockAuthService::new().await;
 
         // Test with different password complexities
         let test_cases = vec![
@@ -615,7 +631,7 @@ mod tests {
         use tokio::task;
 
         // Create a shared auth service for all concurrent operations
-        let shared_auth_service = Arc::new(MockAuthService::new());
+        let shared_auth_service = Arc::new(MockAuthService::new().await);
 
         // Test concurrent registrations (should handle properly)
         let registration_tasks = (0..5).map(|i| {
@@ -665,8 +681,13 @@ mod tests {
     async fn test_real_go_backend_integration() {
         println!("🧪 Testing real Go backend integration (requires Go server running on port 8080)");
 
-        // Use the real AuthService (not mock) to test actual HTTP communication
-        let real_auth_service = super::super::service::AuthService::new();
+        // Use the real AuthService with SQLite persistence to test actual HTTP communication
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let db_path = temp_dir.path().join("test_real_auth.db");
+        let master_password = "test_real_master_password_2024";
+
+        let real_auth_service = super::super::service::AuthService::with_sqlite_persistence(db_path, master_password).await
+            .expect("Failed to create real AuthService with SQLite persistence");
 
         // Test unique username to avoid conflicts
         let test_username = format!("integration_test_user_{}", chrono::Utc::now().timestamp());
