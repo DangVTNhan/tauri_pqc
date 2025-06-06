@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PasswordDialog } from '@/components/ui/password-dialog';
 import { Separator } from '@/components/ui/separator';
 import { useE2EESession } from '@/hooks/useE2EESession';
 import { api } from '@/lib/api';
@@ -53,6 +54,12 @@ export function E2EEGroupSharing() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [groupFiles, setGroupFiles] = useState<Record<string, SharedFile[]>>({});
   const [uploadProgress, setUploadProgress] = useState<FileUploadProgress | null>(null);
+
+  // Password dialog state for file downloads
+  const [downloadPasswordDialog, setDownloadPasswordDialog] = useState(false);
+  const [downloadPasswordError, setDownloadPasswordError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [pendingDownloadFile, setPendingDownloadFile] = useState<SharedFile | null>(null);
 
   // Backend availability check
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
@@ -270,7 +277,19 @@ export function E2EEGroupSharing() {
       return;
     }
 
+    // Store the file to download and show password dialog
+    setPendingDownloadFile(file);
+    setDownloadPasswordError(null);
+    setDownloadPasswordDialog(true);
+  };
+
+  const handleDownloadPasswordSubmit = async (downloadPassword: string) => {
+    if (!pendingDownloadFile) return;
+
     try {
+      setIsDownloading(true);
+      setDownloadPasswordError(null);
+
       toast.info('Downloading and decrypting file...');
 
       // Call the new Tauri command that handles all crypto operations in Rust
@@ -281,29 +300,55 @@ export function E2EEGroupSharing() {
         error?: string;
       }>('e2ee_download_and_decrypt_file', {
         request: {
-          file_id: file.id,
-          password: password, // User's password for key decryption
+          file_id: pendingDownloadFile.id,
+          password: downloadPassword, // User's password for key decryption
         }
       });
 
       if (downloadResult.success && downloadResult.file_data) {
-        // For now, just show success message since we have placeholder data
-        toast.success(`Successfully downloaded and decrypted: ${downloadResult.file_name || file.original_name}`);
+        // Close the password dialog
+        setDownloadPasswordDialog(false);
+        setPendingDownloadFile(null);
 
-        // In a real implementation, we would:
-        // 1. Convert base64 file_data back to binary
-        // 2. Create a blob and download it
-        console.log('File download successful:', {
-          fileName: downloadResult.file_name,
-          dataLength: downloadResult.file_data.length,
-        });
+        // Show success message
+        toast.success(`Successfully downloaded and decrypted: ${downloadResult.file_name || pendingDownloadFile.original_name}`);
+
+        // Convert base64 file_data back to binary and trigger download
+        try {
+          const binaryString = atob(downloadResult.file_data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          const blob = new Blob([bytes]);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = downloadResult.file_name || pendingDownloadFile.original_name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          console.log('File download successful:', {
+            fileName: downloadResult.file_name,
+            dataLength: downloadResult.file_data.length,
+          });
+        } catch (error) {
+          console.error('Failed to process downloaded file:', error);
+          toast.error('Failed to process downloaded file');
+        }
       } else {
-        toast.error(downloadResult.error || 'Failed to download file');
+        // Show error in the password dialog
+        setDownloadPasswordError(downloadResult.error || 'Failed to download file');
       }
 
     } catch (error) {
-      toast.error('Failed to download file');
+      setDownloadPasswordError('Failed to download file');
       console.error('Download error:', error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -653,6 +698,17 @@ export function E2EEGroupSharing() {
           </Card>
         )}
       </div>
+
+      {/* Password Dialog for File Downloads */}
+      <PasswordDialog
+        open={downloadPasswordDialog}
+        onOpenChange={setDownloadPasswordDialog}
+        onSubmit={handleDownloadPasswordSubmit}
+        title="Enter Password for File Download"
+        description={`Please enter your password to decrypt and download "${pendingDownloadFile?.original_name || 'the file'}".`}
+        isLoading={isDownloading}
+        error={downloadPasswordError || undefined}
+      />
     </div>
   );
 }

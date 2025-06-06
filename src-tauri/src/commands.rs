@@ -321,6 +321,9 @@ pub async fn generate_key_bundle(password: String) -> Result<KeyBundleResult, St
     OsRng.fill_bytes(&mut signed_pre_private);
     let signed_pre_public = x25519_dalek::x25519(signed_pre_private, x25519_dalek::X25519_BASEPOINT_BYTES);
 
+    println!("🔍 DEBUG KEYGEN: Generated signed pre-key private: {}", base64::engine::general_purpose::STANDARD.encode(signed_pre_private));
+    println!("🔍 DEBUG KEYGEN: Generated signed pre-key public: {}", base64::engine::general_purpose::STANDARD.encode(signed_pre_public));
+
     // Generate Kyber-768 key pair
     let mut rng = rand::thread_rng();
     let kyber_keys = keypair(&mut rng)
@@ -334,18 +337,14 @@ pub async fn generate_key_bundle(password: String) -> Result<KeyBundleResult, St
     // Sign the pre-key with identity key
     let signature = identity_signing_key.sign(&signed_pre_public);
 
-    // Generate salt and nonce for key derivation
+    // Generate salt for key derivation
     let salt = {
         let mut s = [0u8; 32];
         OsRng.fill_bytes(&mut s);
         s
     };
 
-    let nonce = {
-        let mut n = [0u8; 12];
-        OsRng.fill_bytes(&mut n);
-        n
-    };
+    println!("🔍 DEBUG KEYGEN: Generated salt: {}", base64::engine::general_purpose::STANDARD.encode(salt));
 
     // Derive encryption key from password
     let master_key = MasterKey::from_password(
@@ -355,6 +354,18 @@ pub async fn generate_key_bundle(password: String) -> Result<KeyBundleResult, St
     ).map_err(|e| format!("Failed to derive key from password: {}", e))?;
 
     let encryption_service = EncryptionService::with_master_key(master_key);
+
+    // Test encryption/decryption immediately to verify it works
+    let test_data = b"test_private_key_data";
+    let test_encrypted = encryption_service.encrypt(test_data)
+        .map_err(|e| format!("Test encryption failed: {}", e))?;
+    let test_decrypted = encryption_service.decrypt(&test_encrypted)
+        .map_err(|e| format!("Test decryption failed: {}", e))?;
+
+    if test_data != test_decrypted.as_slice() {
+        return Err("Test encryption/decryption verification failed".to_string());
+    }
+    println!("🔍 DEBUG KEYGEN: Test encryption/decryption successful");
 
     // Encrypt private keys
     let identity_private_encrypted = encryption_service
@@ -442,6 +453,10 @@ pub async fn perform_key_exchange(
     OsRng.fill_bytes(&mut ephemeral_private_bytes);
     let ephemeral_public_bytes = x25519_dalek::x25519(ephemeral_private_bytes, x25519_dalek::X25519_BASEPOINT_BYTES);
 
+    println!("🔍 DEBUG SHARE: Ephemeral private key: {}", base64::engine::general_purpose::STANDARD.encode(ephemeral_private_bytes));
+    println!("🔍 DEBUG SHARE: Ephemeral public key: {}", base64::engine::general_purpose::STANDARD.encode(ephemeral_public_bytes));
+    println!("🔍 DEBUG SHARE: Recipient signed pre-key public: {}", recipient_public_keys.signed_pre_key);
+
     // Perform proper X25519 ECDH
     if recipient_signed_pre_key.len() != 32 {
         return Err("Invalid recipient signed pre-key length".to_string());
@@ -449,6 +464,8 @@ pub async fn perform_key_exchange(
     let mut recipient_public_array = [0u8; 32];
     recipient_public_array.copy_from_slice(&recipient_signed_pre_key);
     let ecdh_secret = x25519_dalek::x25519(ephemeral_private_bytes, recipient_public_array);
+
+    println!("🔍 DEBUG SHARE: ECDH secret: {}", base64::engine::general_purpose::STANDARD.encode(ecdh_secret));
 
     // Perform Kyber encapsulation
     if recipient_kyber_public.len() != KYBER_PUBLICKEYBYTES {
@@ -463,16 +480,17 @@ pub async fn perform_key_exchange(
     let (kyber_ciphertext, kyber_shared_secret) = encapsulate(&kyber_public_array, &mut rng)
         .map_err(|e| format!("Kyber encapsulation failed: {:?}", e))?;
 
-    // Generate salt for HKDF
-    let mut hkdf_salt = [0u8; 32];
-    OsRng.fill_bytes(&mut hkdf_salt);
+    println!("🔍 DEBUG SHARE: Kyber secret: {}", base64::engine::general_purpose::STANDARD.encode(&kyber_shared_secret));
+
+    // Use fixed salt for consistent key derivation across all exchanges
+    let fixed_salt = b"e2ee_file_sharing_salt_v1";
 
     // Combine ECDH and Kyber secrets using HKDF
     let mut combined_secret = Vec::new();
     combined_secret.extend_from_slice(&ecdh_secret);
     combined_secret.extend_from_slice(&kyber_shared_secret);
 
-    let hk = Hkdf::<Sha256>::new(Some(&hkdf_salt), &combined_secret);
+    let hk = Hkdf::<Sha256>::new(Some(fixed_salt), &combined_secret);
     let mut final_shared_secret = [0u8; 32];
     hk.expand(b"e2ee_key_exchange", &mut final_shared_secret)
         .map_err(|e| format!("HKDF expansion failed: {}", e))?;
@@ -481,7 +499,7 @@ pub async fn perform_key_exchange(
         shared_secret: base64::engine::general_purpose::STANDARD.encode(final_shared_secret),
         ephemeral_public_key: base64::engine::general_purpose::STANDARD.encode(ephemeral_public_bytes),
         kyber_ciphertext: base64::engine::general_purpose::STANDARD.encode(&kyber_ciphertext),
-        salt: base64::engine::general_purpose::STANDARD.encode(hkdf_salt),
+        salt: base64::engine::general_purpose::STANDARD.encode(fixed_salt),
     })
 }
 
@@ -533,6 +551,10 @@ pub async fn unwrap_master_key(
 ) -> Result<String, String> {
     use base64::Engine;
 
+    println!("🔍 DEBUG UNWRAP: Input wrapped_key.encrypted_key: {}", wrapped_key.encrypted_key);
+    println!("🔍 DEBUG UNWRAP: Input wrapped_key.nonce: {}", wrapped_key.nonce);
+    println!("🔍 DEBUG UNWRAP: Input shared_secret: {}", shared_secret);
+
     // Decode inputs
     let encrypted_key_bytes = base64::engine::general_purpose::STANDARD
         .decode(wrapped_key.encrypted_key)
@@ -546,9 +568,12 @@ pub async fn unwrap_master_key(
         .decode(wrapped_key.nonce)
         .map_err(|e| format!("Failed to decode nonce: {}", e))?;
 
+    println!("🔍 DEBUG UNWRAP: Decoded lengths - encrypted_key: {}, shared_secret: {}, nonce: {}",
+             encrypted_key_bytes.len(), shared_secret_bytes.len(), nonce_bytes.len());
+
     // Create encryption service with shared secret as key
     if shared_secret_bytes.len() != 32 {
-        return Err("Invalid shared secret length".to_string());
+        return Err(format!("Invalid shared secret length: expected 32, got {}", shared_secret_bytes.len()));
     }
 
     let mut key_array = [0u8; 32];
@@ -556,16 +581,24 @@ pub async fn unwrap_master_key(
     let master_key_obj = crate::store::encryption::MasterKey::from_bytes(key_array);
     let encryption_service = crate::store::encryption::EncryptionService::with_master_key(master_key_obj);
 
+    println!("🔍 DEBUG UNWRAP: Created encryption service with shared secret");
+
     // Create encrypted data structure
     let encrypted_data = crate::store::encryption::EncryptedData::new(encrypted_key_bytes, nonce_bytes, None);
+
+    println!("🔍 DEBUG UNWRAP: Created encrypted data structure");
 
     // Decrypt the master key
     let decrypted_key = encryption_service
         .decrypt(&encrypted_data)
-        .map_err(|e| format!("Failed to unwrap master key: {}", e))?;
+        .map_err(|e| format!("Decryption error: {}", e))?;
+
+    println!("🔍 DEBUG UNWRAP: Successfully decrypted master key, length: {}", decrypted_key.len());
 
     // Return as base64
-    Ok(base64::engine::general_purpose::STANDARD.encode(decrypted_key))
+    let result = base64::engine::general_purpose::STANDARD.encode(decrypted_key);
+    println!("🔍 DEBUG UNWRAP: Returning master key: {}", result);
+    Ok(result)
 }
 
 /// Decrypt a private key using password
@@ -578,6 +611,10 @@ pub async fn decrypt_private_key(
 ) -> Result<String, String> {
     use base64::Engine;
     use crate::store::encryption::{MasterKey, EncryptionService, EncryptedData};
+
+    println!("🔍 DEBUG DECRYPT: Input salt: {}", salt);
+    println!("🔍 DEBUG DECRYPT: Input nonce: {}", nonce);
+    println!("🔍 DEBUG DECRYPT: Input encrypted_key length: {}", encrypted_private_key.len());
 
     // Decode inputs
     let encrypted_key_bytes = base64::engine::general_purpose::STANDARD
@@ -592,6 +629,9 @@ pub async fn decrypt_private_key(
         .decode(salt)
         .map_err(|e| format!("Failed to decode salt: {}", e))?;
 
+    println!("🔍 DEBUG DECRYPT: Decoded lengths - encrypted_key: {}, nonce: {}, salt: {}",
+             encrypted_key_bytes.len(), nonce_bytes.len(), salt_bytes.len());
+
     // Derive master key from password
     let master_key = MasterKey::from_password(
         &password,
@@ -599,22 +639,31 @@ pub async fn decrypt_private_key(
         &crate::store::encryption::EncryptionConfig::default(),
     ).map_err(|e| format!("Failed to derive key from password: {}", e))?;
 
+    println!("🔍 DEBUG DECRYPT: Master key derived successfully");
+
     let encryption_service = EncryptionService::with_master_key(master_key);
 
     // Create encrypted data structure
     let encrypted_data = EncryptedData::new(encrypted_key_bytes, nonce_bytes, None);
 
+    println!("🔍 DEBUG DECRYPT: Created encrypted data structure");
+
     // Decrypt the private key
     let decrypted_key = encryption_service
         .decrypt(&encrypted_data)
-        .map_err(|e| format!("Failed to decrypt private key: {}", e))?;
+        .map_err(|e| {
+            println!("❌ DEBUG DECRYPT: Decryption failed: {}", e);
+            format!("Decryption error: {}", e)
+        })?;
+
+    println!("🔍 DEBUG DECRYPT: Successfully decrypted private key, length: {}", decrypted_key.len());
 
     // Return as base64
     Ok(base64::engine::general_purpose::STANDARD.encode(decrypted_key))
 }
 
 // Result structures for key operations
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct KeyBundleResult {
     pub public_keys: PublicKeyBundleResult,
     pub private_keys: PrivateKeyBundleResult,
@@ -858,6 +907,135 @@ pub async fn generate_random_bytes(length: usize) -> Result<String, String> {
     rand::thread_rng().fill_bytes(&mut bytes);
 
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Encrypt file content using a master key
+#[tauri::command]
+pub async fn encrypt_file_content(
+    file_content: &[u8],
+    master_key: &str,
+) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    use crate::store::encryption::{EncryptionService, MasterKey};
+
+    // Decode the master key
+    let master_key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(master_key)
+        .map_err(|e| format!("Failed to decode master key: {}", e))?;
+
+    if master_key_bytes.len() != 32 {
+        return Err("Invalid master key length".to_string());
+    }
+
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&master_key_bytes);
+    let master_key_obj = MasterKey::from_bytes(key_array);
+
+    // Create encryption service
+    let encryption_service = EncryptionService::with_master_key(master_key_obj);
+
+    // Encrypt the content
+    let encrypted_data = encryption_service.encrypt(file_content)
+        .map_err(|e| format!("Failed to encrypt file content: {}", e))?;
+
+    // Serialize the encrypted data structure
+    let serialized_data = serde_json::to_vec(&encrypted_data)
+        .map_err(|e| format!("Failed to serialize encrypted data: {}", e))?;
+
+    // Return as base64-encoded bytes
+    Ok(base64::engine::general_purpose::STANDARD.encode(serialized_data).into_bytes())
+}
+
+/// Decrypt file content using a master key
+#[tauri::command]
+pub async fn decrypt_file_content(
+    encrypted_content: &str,
+    master_key: &str,
+) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    use crate::store::encryption::{EncryptionService, MasterKey};
+
+    // Decode the master key
+    let master_key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(master_key)
+        .map_err(|e| format!("Failed to decode master key: {}", e))?;
+
+    if master_key_bytes.len() != 32 {
+        return Err("Invalid master key length".to_string());
+    }
+
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&master_key_bytes);
+    let master_key_obj = MasterKey::from_bytes(key_array);
+
+    // Create encryption service
+    let encryption_service = EncryptionService::with_master_key(master_key_obj);
+
+    // Decode the encrypted content
+    let encrypted_data = base64::engine::general_purpose::STANDARD
+        .decode(encrypted_content)
+        .map_err(|e| format!("Failed to decode encrypted content: {}", e))?;
+
+    // Parse as EncryptedData structure
+    let encrypted_struct: crate::store::encryption::EncryptedData = serde_json::from_slice(&encrypted_data)
+        .map_err(|e| format!("Failed to parse encrypted data structure: {}", e))?;
+
+    // Decrypt the content
+    let decrypted_data = encryption_service.decrypt(&encrypted_struct)
+        .map_err(|e| format!("Failed to decrypt file content: {}", e))?;
+
+    Ok(decrypted_data)
+}
+
+/// Save file to Downloads directory
+#[tauri::command]
+pub async fn save_file_to_downloads(
+    file_data: &[u8],
+    file_name: &str,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+    use tokio::fs;
+
+    // Get the user's Downloads directory
+    let downloads_dir = match std::env::var("HOME") {
+        Ok(home) => PathBuf::from(home).join("Downloads"),
+        Err(_) => {
+            // Fallback to current directory if HOME is not set
+            PathBuf::from(".")
+        }
+    };
+
+    // Ensure Downloads directory exists
+    if !downloads_dir.exists() {
+        fs::create_dir_all(&downloads_dir).await
+            .map_err(|e| format!("Failed to create Downloads directory: {}", e))?;
+    }
+
+    // Create the full file path
+    let file_path = downloads_dir.join(file_name);
+
+    // Handle file name conflicts by adding a number suffix
+    let mut final_path = file_path.clone();
+    let mut counter = 1;
+    while final_path.exists() {
+        let stem = file_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let extension = file_path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| format!(".{}", s))
+            .unwrap_or_default();
+
+        let new_name = format!("{} ({}){}", stem, counter, extension);
+        final_path = downloads_dir.join(new_name);
+        counter += 1;
+    }
+
+    // Write the file
+    fs::write(&final_path, file_data).await
+        .map_err(|e| format!("Failed to write file to Downloads: {}", e))?;
+
+    Ok(final_path.to_string_lossy().to_string())
 }
 
 // Result structures for new cryptographic operations
@@ -1172,7 +1350,11 @@ pub async fn e2ee_share_file_with_group(
     let encrypted_data = encryption_service.encrypt(&file_data)
         .map_err(|e| format!("Failed to encrypt file: {}", e))?;
 
-    let encrypted_base64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_data.ciphertext);
+    // Serialize the complete encrypted data structure (including nonce, salt, etc.)
+    let serialized_encrypted_data = serde_json::to_vec(&encrypted_data)
+        .map_err(|e| format!("Failed to serialize encrypted data: {}", e))?;
+
+    let encrypted_base64 = base64::engine::general_purpose::STANDARD.encode(&serialized_encrypted_data);
 
     // Step 5: Get group members' public key bundles from Go API
     let client = ApiClient::default();
@@ -1254,12 +1436,12 @@ pub async fn e2ee_share_file_with_group(
         // Wrap master key with derived shared secret
         let wrapped_key = wrap_master_key(
             master_key.clone(),
-            key_exchange_result.shared_secret,
+            key_exchange_result.shared_secret.clone(),
             key_exchange_result.salt.clone(),
         ).await.map_err(|e| format!("Failed to wrap key for user {}: {}", user_id, e))?;
 
         // Store wrapped key with key exchange data
-        wrapped_keys.insert(user_id.to_string(), serde_json::json!({
+        let wrapped_key_json = serde_json::json!({
             "encrypted_key": wrapped_key.encrypted_key,
             "key_exchange": {
                 "ephemeral_public_key": key_exchange_result.ephemeral_public_key,
@@ -1267,13 +1449,18 @@ pub async fn e2ee_share_file_with_group(
                 "salt": key_exchange_result.salt,
                 "nonce": wrapped_key.nonce,
             }
-        }));
+        });
+
+        println!("🔍 DEBUG SHARE: User {} - Shared Secret: {}", user_id, key_exchange_result.shared_secret);
+        println!("🔍 DEBUG SHARE: User {} - Wrapped Key: {}", user_id, serde_json::to_string_pretty(&wrapped_key_json).unwrap_or_default());
+
+        wrapped_keys.insert(user_id.to_string(), wrapped_key_json);
     }
 
     // Step 7: Upload encrypted file to blob storage
     let blob_response = client.post::<Value, _>("/blobs/upload", &serde_json::json!({
         "encrypted_content": encrypted_base64,
-        "blob_hash": format!("{:x}", sha2::Sha256::digest(&encrypted_data.ciphertext)),
+        "blob_hash": format!("{:x}", sha2::Sha256::digest(&serialized_encrypted_data)),
     })).await.map_err(|e| format!("Failed to upload blob: {}", e))?;
 
     if !blob_response.success {
@@ -1362,18 +1549,19 @@ pub async fn e2ee_share_file_with_group(
 /// Get user's private keys by decrypting them with password
 #[tauri::command]
 pub async fn get_user_private_keys(
-    _state: tauri::State<'_, crate::auth::commands::AuthState>,
+    state: tauri::State<'_, crate::auth::commands::AuthState>,
     password: String,
 ) -> Result<PrivateKeyBundleResult, String> {
-    // For now, we'll generate a new key bundle since the current auth system
-    // doesn't store key bundles with the user. In a production system,
-    // we would store the encrypted key bundle during registration.
+    // Get current user from auth service
+    let auth_service = state.service.read().await;
+    let current_user = auth_service.get_current_user().await
+        .map_err(|e| format!("Failed to get current user: {}", e))?;
 
-    // TODO: Modify auth system to store key bundles with users
-    // For now, generate a temporary key bundle for demonstration
-    let key_bundle = generate_key_bundle(password.clone()).await?;
+    // Get stored private keys from auth service
+    let stored_private_keys = auth_service.get_user_private_keys(&current_user.id, &password).await
+        .map_err(|e| format!("Failed to retrieve private keys: {}", e))?;
 
-    Ok(key_bundle.private_keys)
+    Ok(stored_private_keys)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1411,7 +1599,7 @@ pub async fn e2ee_download_and_decrypt_file(
     };
 
     // Step 2: Get user's private keys
-    let _user_private_keys = match get_user_private_keys(state.clone(), request.password.clone()).await {
+    let user_private_keys = match get_user_private_keys(state.clone(), request.password.clone()).await {
         Ok(keys) => keys,
         Err(e) => return Ok(FileDownloadResult {
             success: false,
@@ -1466,6 +1654,8 @@ pub async fn e2ee_download_and_decrypt_file(
     }
 
     let messages_data = messages_response.data.ok_or("No messages data received")?;
+    println!("🔍 DEBUG DOWNLOAD: Messages data: {}", serde_json::to_string_pretty(&messages_data).unwrap_or_default());
+
     let messages = messages_data.get("messages")
         .and_then(|m| m.as_array())
         .ok_or("Invalid messages data")?;
@@ -1478,8 +1668,12 @@ pub async fn e2ee_download_and_decrypt_file(
         })
         .ok_or("No access key found for this file")?;
 
+    println!("🔍 DEBUG DOWNLOAD: Found wrapped message: {}", serde_json::to_string_pretty(wrapped_message).unwrap_or_default());
+
     let wrapped_key_data = wrapped_message.get("wrapped_key")
         .ok_or("Missing wrapped key in message")?;
+
+    println!("🔍 DEBUG DOWNLOAD: Wrapped key data: {}", serde_json::to_string_pretty(wrapped_key_data).unwrap_or_default());
 
     // Step 5: Get file metadata
     let file_response = client.get::<Value>(&format!("/files/{}/info?user_id={}", request.file_id, go_user_id)).await
@@ -1516,7 +1710,7 @@ pub async fn e2ee_download_and_decrypt_file(
     }
 
     let blob_data = blob_response.data.ok_or("No blob data received")?;
-    let _encrypted_content = blob_data.get("encrypted_content")
+    let encrypted_content = blob_data.get("encrypted_content")
         .and_then(|c| c.as_str())
         .ok_or("Missing encrypted_content in blob data")?;
 
@@ -1524,27 +1718,157 @@ pub async fn e2ee_download_and_decrypt_file(
     let key_exchange_data = wrapped_key_data.get("key_exchange")
         .ok_or("Missing key_exchange data")?;
 
-    let _ephemeral_public_key = key_exchange_data.get("ephemeral_public_key")
+    println!("🔍 DEBUG DOWNLOAD: Key exchange data: {}", serde_json::to_string_pretty(key_exchange_data).unwrap_or_default());
+
+    let ephemeral_public_key = key_exchange_data.get("ephemeral_public_key")
         .and_then(|k| k.as_str())
         .ok_or("Missing ephemeral_public_key")?;
-    let _kyber_ciphertext = key_exchange_data.get("kyber_ciphertext")
+    let kyber_ciphertext = key_exchange_data.get("kyber_ciphertext")
         .and_then(|k| k.as_str())
         .ok_or("Missing kyber_ciphertext")?;
-    let _salt = key_exchange_data.get("salt")
+    let salt = key_exchange_data.get("salt")
         .and_then(|s| s.as_str())
         .ok_or("Missing salt")?;
 
-    // For now, return success with placeholder data since full implementation would be complex
-    // In a real implementation, we would:
-    // 1. Perform ECDH with ephemeral key
-    // 2. Perform Kyber decapsulation
-    // 3. Derive shared secret using HKDF
-    // 4. Unwrap master key
-    // 5. Decrypt file content
+    println!("🔍 DEBUG DOWNLOAD: Extracted values - ephemeral_public_key: {}, kyber_ciphertext: {}, salt: {}",
+             ephemeral_public_key, kyber_ciphertext, salt);
+
+    // Step 8: Extract encrypted private keys from user_private_keys structure
+    let encrypted_signed_pre_key = &user_private_keys.signed_pre_key;
+    let signed_pre_key_nonce = &user_private_keys.signed_pre_key_nonce;
+    let encrypted_kyber_key = &user_private_keys.kyber_pre_key;
+    let kyber_key_nonce = &user_private_keys.kyber_pre_key_nonce;
+    let user_salt = &user_private_keys.salt;
+
+    println!("🔍 DEBUG DOWNLOAD: User's private key salt: {}", user_salt);
+    println!("🔍 DEBUG DOWNLOAD: Key exchange salt: {}", salt);
+    println!("🔍 DEBUG DOWNLOAD: Encrypted signed pre key: {}", encrypted_signed_pre_key);
+    println!("🔍 DEBUG DOWNLOAD: Signed pre key nonce: {}", signed_pre_key_nonce);
+    println!("🔍 DEBUG DOWNLOAD: Password length: {}", request.password.len());
+    println!("🔍 DEBUG DOWNLOAD: Password is empty: {}", request.password.is_empty());
+    if request.password.is_empty() {
+        return Ok(FileDownloadResult {
+            success: false,
+            file_data: None,
+            file_name: None,
+            error: Some("Password is required for file decryption".to_string()),
+        });
+    }
+    println!("🔍 DEBUG DOWNLOAD: About to decrypt signed pre-key...");
+
+    // Decrypt private keys
+    let decrypted_signed_pre_key = decrypt_private_key(
+        encrypted_signed_pre_key.to_string(),
+        signed_pre_key_nonce.to_string(),
+        user_salt.to_string(),
+        request.password.clone(),
+    ).await.map_err(|e| format!("Failed to decrypt signed pre key: {}", e))?;
+
+    let decrypted_kyber_key = decrypt_private_key(
+        encrypted_kyber_key.to_string(),
+        kyber_key_nonce.to_string(),
+        user_salt.to_string(),
+        request.password.clone(),
+    ).await.map_err(|e| format!("Failed to decrypt kyber key: {}", e))?;
+
+    println!("🔍 DEBUG DOWNLOAD: Decrypted signed pre key: {}", decrypted_signed_pre_key);
+    println!("🔍 DEBUG DOWNLOAD: Decrypted kyber key length: {}", decrypted_kyber_key.len());
+    println!("🔍 DEBUG DOWNLOAD: Ephemeral public key from sender: {}", ephemeral_public_key);
+
+    // Derive public key from private key to verify correctness
+    let private_key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&decrypted_signed_pre_key)
+        .map_err(|e| format!("Failed to decode private key for verification: {}", e))?;
+    if private_key_bytes.len() == 32 {
+        let mut private_array = [0u8; 32];
+        private_array.copy_from_slice(&private_key_bytes);
+        let derived_public = x25519_dalek::x25519(private_array, x25519_dalek::X25519_BASEPOINT_BYTES);
+        println!("🔍 DEBUG DOWNLOAD: Derived public key from private: {}", base64::engine::general_purpose::STANDARD.encode(derived_public));
+    }
+
+    // Step 9: Perform ECDH with ephemeral key
+    let ecdh_secret = perform_ecdh(
+        decrypted_signed_pre_key.clone(),
+        ephemeral_public_key.to_string(),
+    ).await.map_err(|e| format!("ECDH failed: {}", e))?;
+
+    println!("🔍 DEBUG DOWNLOAD: ECDH secret: {}", ecdh_secret);
+
+    // Step 10: Perform Kyber decapsulation
+    let kyber_secret = kyber_decapsulate(
+        decrypted_kyber_key.clone(),
+        kyber_ciphertext.to_string(),
+    ).await.map_err(|e| format!("Kyber decapsulation failed: {}", e))?;
+
+    println!("🔍 DEBUG DOWNLOAD: Kyber secret: {}", kyber_secret);
+
+    // Step 11: Derive shared secret using HKDF (same as in perform_key_exchange)
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    use base64::Engine;
+
+    let ecdh_bytes = base64::engine::general_purpose::STANDARD
+        .decode(ecdh_secret)
+        .map_err(|e| format!("Failed to decode ECDH secret: {}", e))?;
+    let kyber_bytes = base64::engine::general_purpose::STANDARD
+        .decode(kyber_secret)
+        .map_err(|e| format!("Failed to decode Kyber secret: {}", e))?;
+    let salt_bytes = base64::engine::general_purpose::STANDARD
+        .decode(salt)
+        .map_err(|e| format!("Failed to decode key exchange salt: {}", e))?;
+
+    // Combine ECDH and Kyber secrets (same as perform_key_exchange)
+    let mut combined_secret = Vec::new();
+    combined_secret.extend_from_slice(&ecdh_bytes);
+    combined_secret.extend_from_slice(&kyber_bytes);
+
+    // Use HKDF without salt dependency for consistent key derivation
+    // Use a fixed salt for consistency across all key exchanges
+    let fixed_salt = b"e2ee_file_sharing_salt_v1";
+    let hk = Hkdf::<Sha256>::new(Some(fixed_salt), &combined_secret);
+    let mut final_shared_secret = [0u8; 32];
+    hk.expand(b"e2ee_key_exchange", &mut final_shared_secret)
+        .map_err(|e| format!("HKDF expansion failed: {}", e))?;
+
+    let shared_secret = base64::engine::general_purpose::STANDARD.encode(final_shared_secret);
+
+    println!("🔍 DEBUG DOWNLOAD: Derived shared secret: {}", shared_secret);
+
+    // Step 12: Unwrap master key
+    let encrypted_key = wrapped_key_data.get("encrypted_key")
+        .and_then(|k| k.as_str())
+        .ok_or("Missing encrypted_key in wrapped key data")?
+        .to_string();
+
+    let nonce = key_exchange_data.get("nonce")
+        .and_then(|n| n.as_str())
+        .ok_or("Missing nonce in key exchange data")?
+        .to_string();
+
+    let wrapped_key_result = WrappedKeyResult {
+        encrypted_key: encrypted_key.clone(),
+        nonce: nonce.clone(),
+    };
+
+    println!("🔍 DEBUG DOWNLOAD: Wrapped key result - encrypted_key: {}, nonce: {}",
+             encrypted_key, nonce);
+
+    let master_key = unwrap_master_key(wrapped_key_result, shared_secret.clone()).await
+        .map_err(|e| format!("Failed to unwrap master key: {}", e))?;
+
+    println!("🔍 DEBUG DOWNLOAD: Successfully unwrapped master key: {}", master_key);
+
+    // Step 13: Decrypt file content
+    let decrypted_file_data = decrypt_file_content(encrypted_content, &master_key).await
+        .map_err(|e| format!("Failed to decrypt file content: {}", e))?;
+
+    // Step 14: Save file to Downloads directory
+    let _downloads_path = save_file_to_downloads(&decrypted_file_data, file_name).await
+        .map_err(|e| format!("Failed to save file to Downloads: {}", e))?;
 
     Ok(FileDownloadResult {
         success: true,
-        file_data: Some("placeholder_decrypted_data".to_string()),
+        file_data: Some(base64::engine::general_purpose::STANDARD.encode(decrypted_file_data)),
         file_name: Some(file_name.to_string()),
         error: None,
     })
@@ -1676,6 +2000,114 @@ pub async fn open_url(_url: String, vault_name: Option<String>) -> Result<(), St
         // Linux implementation - for now just return an error since WebDAV mounting is not implemented
         println!("WebDAV volume opening not yet implemented for Linux");
         Err("WebDAV volume opening not yet implemented for Linux".to_string())
+    }
+}
+
+/// Test encryption/decryption with the same parameters used in key generation
+#[tauri::command]
+pub async fn test_encryption_decryption(
+    password: String,
+    test_data: String,
+) -> Result<String, String> {
+    use base64::Engine;
+    use crate::store::encryption::{MasterKey, EncryptionService};
+    use rand::RngCore;
+
+    // Generate the same salt as in key generation
+    let salt = {
+        let mut s = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut s);
+        s
+    };
+
+    println!("🔍 DEBUG TEST: Generated salt: {}", base64::engine::general_purpose::STANDARD.encode(salt));
+
+    // Derive master key from password (same as in key generation)
+    let master_key = MasterKey::from_password(
+        &password,
+        &salt,
+        &crate::store::encryption::EncryptionConfig::default(),
+    ).map_err(|e| format!("Failed to derive key from password: {}", e))?;
+
+    let encryption_service = EncryptionService::with_master_key(master_key);
+
+    // Test encryption
+    let encrypted_data = encryption_service.encrypt(test_data.as_bytes())
+        .map_err(|e| format!("Test encryption failed: {}", e))?;
+
+    println!("🔍 DEBUG TEST: Encrypted data - ciphertext length: {}, nonce length: {}",
+             encrypted_data.ciphertext.len(), encrypted_data.nonce.len());
+
+    // Test decryption
+    let decrypted_data = encryption_service.decrypt(&encrypted_data)
+        .map_err(|e| format!("Test decryption failed: {}", e))?;
+
+    let decrypted_string = String::from_utf8(decrypted_data)
+        .map_err(|e| format!("Failed to convert decrypted data to string: {}", e))?;
+
+    if decrypted_string == test_data {
+        Ok(format!("✅ Test passed! Original: '{}', Decrypted: '{}'", test_data, decrypted_string))
+    } else {
+        Err(format!("❌ Test failed! Original: '{}', Decrypted: '{}'", test_data, decrypted_string))
+    }
+}
+
+/// Test the exact same encryption/decryption flow as used in key generation
+#[tauri::command]
+pub async fn test_key_generation_flow(password: String) -> Result<String, String> {
+    use base64::Engine;
+    use crate::store::encryption::{MasterKey, EncryptionService};
+    use rand::RngCore;
+
+    // Generate salt exactly like in generate_key_bundle
+    let salt = {
+        let mut s = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut s);
+        s
+    };
+
+    println!("🔍 DEBUG KEY_TEST: Generated salt: {}", base64::engine::general_purpose::STANDARD.encode(salt));
+
+    // Derive master key exactly like in generate_key_bundle
+    let master_key = MasterKey::from_password(
+        &password,
+        &salt,
+        &crate::store::encryption::EncryptionConfig::default(),
+    ).map_err(|e| format!("Failed to derive key from password: {}", e))?;
+
+    let encryption_service = EncryptionService::with_master_key(master_key);
+
+    // Test with dummy private key data (similar to what's encrypted in key generation)
+    let test_private_key = b"dummy_private_key_data_for_testing_32bytes";
+
+    // Encrypt the test private key
+    let encrypted_private_key = encryption_service.encrypt(test_private_key)
+        .map_err(|e| format!("Failed to encrypt test private key: {}", e))?;
+
+    println!("🔍 DEBUG KEY_TEST: Encrypted private key - ciphertext: {}, nonce: {}",
+             base64::engine::general_purpose::STANDARD.encode(&encrypted_private_key.ciphertext),
+             base64::engine::general_purpose::STANDARD.encode(&encrypted_private_key.nonce));
+
+    // Now test decryption using the same flow as decrypt_private_key
+    let salt_b64 = base64::engine::general_purpose::STANDARD.encode(salt);
+    let encrypted_key_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_private_key.ciphertext);
+    let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_private_key.nonce);
+
+    // Call the actual decrypt_private_key function
+    match decrypt_private_key(encrypted_key_b64, nonce_b64, salt_b64, password).await {
+        Ok(decrypted_b64) => {
+            let decrypted_bytes = base64::engine::general_purpose::STANDARD
+                .decode(decrypted_b64)
+                .map_err(|e| format!("Failed to decode decrypted result: {}", e))?;
+
+            if decrypted_bytes == test_private_key {
+                Ok("✅ Key generation flow test passed!".to_string())
+            } else {
+                Err(format!("❌ Key generation flow test failed! Original length: {}, Decrypted length: {}",
+                           test_private_key.len(), decrypted_bytes.len()))
+            }
+        }
+        Err(e) => Err(format!("❌ Key generation flow test failed during decryption: {}", e))
     }
 }
 

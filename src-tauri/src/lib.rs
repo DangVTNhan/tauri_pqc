@@ -17,6 +17,9 @@ mod auth;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod e2ee_key_storage_test;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -59,6 +62,9 @@ pub fn run() {
             commands::kyber_decapsulate,
             commands::derive_shared_secret,
             commands::generate_random_bytes,
+            // Test commands for debugging
+            commands::test_encryption_decryption,
+            commands::test_key_generation_flow,
             // API proxy commands
             commands::api_health_check,
             commands::api_upload_blob,
@@ -77,6 +83,8 @@ pub fn run() {
             commands::e2ee_share_file_with_group,
             commands::e2ee_download_and_decrypt_file,
             commands::get_user_private_keys,
+            commands::decrypt_file_content,
+            commands::save_file_to_downloads,
             // Authentication commands
             auth::commands::auth_init_persistence,
             auth::commands::auth_register,

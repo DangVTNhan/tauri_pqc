@@ -90,6 +90,13 @@ impl StorageError {
         Self::KeyDerivation(msg.into())
     }
 
+    /// Create a serialization error
+    pub fn serialization<S: Into<String>>(msg: S) -> Self {
+        // Create a custom IO error and convert it to serde_json::Error
+        let io_error = std::io::Error::new(std::io::ErrorKind::InvalidData, msg.into());
+        Self::Serialization(serde_json::Error::io(io_error))
+    }
+
     /// Create a transaction error
     pub fn transaction<S: Into<String>>(msg: S) -> Self {
         Self::Transaction(msg.into())
@@ -188,5 +195,11 @@ impl From<StorageError> for crate::models::AppError {
             }
             _ => crate::models::AppError::InternalError(err.to_string()),
         }
+    }
+}
+
+impl From<sqlx::migrate::MigrateError> for StorageError {
+    fn from(err: sqlx::migrate::MigrateError) -> Self {
+        Self::Migration(err.to_string())
     }
 }

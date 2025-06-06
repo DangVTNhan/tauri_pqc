@@ -1,5 +1,6 @@
 use crate::models::auth::{AuthUser, UserSession};
 use crate::store::{StorageError, StorageResult, EncryptionService, MasterKey, EncryptionConfig};
+use crate::commands::PrivateKeyBundleResult;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use argon2::password_hash::{rand_core::OsRng, SaltString};
 use uuid::Uuid;
@@ -29,10 +30,60 @@ impl AuthStorage {
         }
     }
 
+    /// Create a new AuthStorage instance with SQLite database
+    pub async fn new_with_sqlite(database_url: &str) -> StorageResult<Self> {
+        // Create database connection pool
+        let pool = SqlitePool::connect(database_url).await?;
+
+        // Run migrations to create tables
+        sqlx::migrate!("./migrations").run(&pool).await?;
+
+        Ok(Self {
+            pool: Some(pool),
+            encryption_service: None,
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
     /// Create new authentication storage with encrypted SQLite persistence
     pub async fn with_sqlite_persistence(db_path: PathBuf, master_password: &str) -> StorageResult<Self> {
+        // Create salt file path alongside the database
+        let salt_path = db_path.with_extension("salt");
+
+        // Try to load existing salt, or generate a new one
+        let salt = if salt_path.exists() {
+            // Load existing salt from file
+            let salt_bytes = tokio::fs::read(&salt_path).await
+                .map_err(|e| StorageError::Io(e))?;
+
+            // Convert Vec<u8> to [u8; 32]
+            if salt_bytes.len() != 32 {
+                return Err(StorageError::configuration(format!(
+                    "Invalid salt file: expected 32 bytes, got {}",
+                    salt_bytes.len()
+                )));
+            }
+            let mut salt_array = [0u8; 32];
+            salt_array.copy_from_slice(&salt_bytes);
+            salt_array
+        } else {
+            // Generate new salt and save it
+            let new_salt = EncryptionService::generate_salt();
+
+            // Ensure parent directory exists
+            if let Some(parent) = salt_path.parent() {
+                tokio::fs::create_dir_all(parent).await
+                    .map_err(|e| StorageError::Io(e))?;
+            }
+
+            // Save salt to file
+            tokio::fs::write(&salt_path, &new_salt).await
+                .map_err(|e| StorageError::Io(e))?;
+
+            new_salt
+        };
+
         // Create encryption service for sensitive data
-        let salt = EncryptionService::generate_salt();
         let encryption_service = EncryptionService::with_password(
             master_password,
             &salt,
@@ -86,6 +137,71 @@ impl AuthStorage {
             .await?;
         }
         Ok(())
+    }
+
+    /// Register a new user with password hashing and key bundle
+    pub async fn register_user_with_keys(&self, username: String, password: String, private_keys: crate::commands::PrivateKeyBundleResult) -> StorageResult<AuthUser> {
+        if let Some(pool) = &self.pool {
+            // Check if user already exists
+            let existing_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM auth_users WHERE username = ?"
+            )
+            .bind(&username)
+            .fetch_one(pool)
+            .await?;
+
+            if existing_count > 0 {
+                return Err(StorageError::configuration(format!("User {} already exists", username)));
+            }
+
+            // Hash password with Argon2
+            let salt = SaltString::generate(&mut OsRng);
+            let argon2 = Argon2::default();
+            let password_hash = argon2
+                .hash_password(password.as_bytes(), &salt)
+                .map_err(|e| StorageError::encryption(format!("Password hashing failed: {}", e)))?
+                .to_string();
+
+            // Create user
+            let user = AuthUser::new(username.clone(), password_hash.clone(), salt.to_string());
+
+            // Serialize private keys to JSON
+            let private_keys_json = serde_json::to_string(&private_keys)
+                .map_err(|e| StorageError::serialization(format!("Failed to serialize private keys: {}", e)))?;
+
+            println!("🔍 DEBUG AUTH: Storing user {} with private keys (length: {})", username, private_keys_json.len());
+
+            // Store user in database with private keys
+            let insert_result = sqlx::query(
+                r#"
+                INSERT INTO auth_users (id, username, password_hash, encrypted_private_keys, public_keys, created_at, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                "#
+            )
+            .bind(user.id.to_string())
+            .bind(&username)
+            .bind(&password_hash)
+            .bind(&private_keys_json)
+            .bind("") // Empty public_keys for now
+            .bind(user.created_at.to_rfc3339())
+            .bind(true)
+            .execute(pool)
+            .await;
+
+            match insert_result {
+                Ok(_) => {
+                    println!("🔍 DEBUG AUTH: Successfully stored user {} in database", username);
+                }
+                Err(e) => {
+                    println!("❌ DEBUG AUTH: Failed to store user {} in database: {}", username, e);
+                    return Err(StorageError::from(e));
+                }
+            }
+
+            Ok(user)
+        } else {
+            Err(StorageError::configuration("Database not initialized"))
+        }
     }
 
     /// Register a new user with password hashing
@@ -351,11 +467,50 @@ impl AuthStorage {
     pub async fn cleanup_expired_sessions(&self) -> StorageResult<u64> {
         let mut sessions = self.sessions.write().await;
         let initial_count = sessions.len();
-        
+
         sessions.retain(|_, session| session.is_valid());
-        
+
         let cleaned_count = initial_count - sessions.len();
         Ok(cleaned_count as u64)
+    }
+
+    /// Get user's private keys by decrypting them with password
+    pub async fn get_user_private_keys(&self, user_id: &uuid::Uuid, _password: &str) -> StorageResult<crate::commands::PrivateKeyBundleResult> {
+        println!("🔍 DEBUG AUTH: Getting private keys for user: {}", user_id);
+
+        if let Some(pool) = &self.pool {
+            // Get user from database
+            let row_result = sqlx::query(
+                "SELECT encrypted_private_keys FROM auth_users WHERE id = ? AND is_active = 1"
+            )
+            .bind(user_id.to_string())
+            .fetch_one(pool)
+            .await;
+
+            match row_result {
+                Ok(row) => {
+                    let encrypted_private_keys: String = row.get("encrypted_private_keys");
+                    println!("🔍 DEBUG AUTH: Found encrypted private keys in database: {}", encrypted_private_keys.len());
+
+                    // Deserialize private keys from JSON
+                    let private_keys: crate::commands::PrivateKeyBundleResult = serde_json::from_str(&encrypted_private_keys)
+                        .map_err(|e| {
+                            println!("❌ DEBUG AUTH: Failed to deserialize private keys: {}", e);
+                            StorageError::serialization(format!("Failed to deserialize private keys: {}", e))
+                        })?;
+
+                    println!("🔍 DEBUG AUTH: Successfully retrieved private keys");
+                    Ok(private_keys)
+                }
+                Err(e) => {
+                    println!("❌ DEBUG AUTH: Failed to find user in database: {}", e);
+                    Err(StorageError::from(e))
+                }
+            }
+        } else {
+            println!("❌ DEBUG AUTH: Database not initialized");
+            Err(StorageError::configuration("Database not initialized"))
+        }
     }
 
     /// Get session count

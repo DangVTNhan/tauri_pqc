@@ -87,8 +87,8 @@ impl AuthService {
         let register_response: RegisterResponse = serde_json::from_value(response_data)
             .map_err(|e| format!("Failed to parse registration response: {}", e))?;
 
-        // Store user locally with encrypted private keys
-        let auth_user = self.auth_storage.register_user(username, password).await
+        // Store user locally with encrypted private keys and key bundle
+        let auth_user = self.auth_storage.register_user_with_keys(username, password, key_bundle_result.private_keys.clone()).await
             .map_err(|e| format!("Local user storage failed: {}", e))?;
 
         // Create session
@@ -204,6 +204,12 @@ impl AuthService {
     pub async fn cleanup_expired_sessions(&self) -> Result<u64, String> {
         self.auth_storage.cleanup_expired_sessions().await
             .map_err(|e| format!("Failed to cleanup sessions: {}", e))
+    }
+
+    /// Get user's private keys by decrypting them with password
+    pub async fn get_user_private_keys(&self, user_id: &uuid::Uuid, password: &str) -> Result<crate::commands::PrivateKeyBundleResult, String> {
+        self.auth_storage.get_user_private_keys(user_id, password).await
+            .map_err(|e| format!("Failed to get private keys: {}", e))
     }
 }
 
