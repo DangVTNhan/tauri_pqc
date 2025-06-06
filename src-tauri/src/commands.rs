@@ -628,7 +628,6 @@ pub async fn decrypt_private_key(
     let decrypted_key = encryption_service
         .decrypt(&encrypted_data)
         .map_err(|e| {
-            println!("❌ DEBUG DECRYPT: Decryption failed: {}", e);
             format!("Decryption error: {}", e)
         })?;
 
@@ -1975,7 +1974,7 @@ pub async fn test_encryption_decryption(
     password: String,
     test_data: String,
 ) -> Result<String, String> {
-
+    
     use crate::store::encryption::{MasterKey, EncryptionService};
     use rand::RngCore;
 
