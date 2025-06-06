@@ -169,8 +169,6 @@ impl AuthStorage {
             let private_keys_json = serde_json::to_string(&private_keys)
                 .map_err(|e| StorageError::serialization(format!("Failed to serialize private keys: {}", e)))?;
 
-            println!("🔍 DEBUG AUTH: Storing user {} with private keys (length: {})", username, private_keys_json.len());
-
             // Store user in database with private keys
             let insert_result = sqlx::query(
                 r#"
@@ -190,10 +188,8 @@ impl AuthStorage {
 
             match insert_result {
                 Ok(_) => {
-                    println!("🔍 DEBUG AUTH: Successfully stored user {} in database", username);
                 }
                 Err(e) => {
-                    println!("❌ DEBUG AUTH: Failed to store user {} in database: {}", username, e);
                     return Err(StorageError::from(e));
                 }
             }
@@ -476,7 +472,6 @@ impl AuthStorage {
 
     /// Get user's private keys by decrypting them with password
     pub async fn get_user_private_keys(&self, user_id: &uuid::Uuid, _password: &str) -> StorageResult<crate::commands::PrivateKeyBundleResult> {
-        println!("🔍 DEBUG AUTH: Getting private keys for user: {}", user_id);
 
         if let Some(pool) = &self.pool {
             // Get user from database
@@ -490,12 +485,10 @@ impl AuthStorage {
             match row_result {
                 Ok(row) => {
                     let encrypted_private_keys: String = row.get("encrypted_private_keys");
-                    println!("🔍 DEBUG AUTH: Found encrypted private keys in database: {}", encrypted_private_keys.len());
 
                     // Deserialize private keys from JSON
                     let private_keys: crate::commands::PrivateKeyBundleResult = serde_json::from_str(&encrypted_private_keys)
                         .map_err(|e| {
-                            println!("❌ DEBUG AUTH: Failed to deserialize private keys: {}", e);
                             StorageError::serialization(format!("Failed to deserialize private keys: {}", e))
                         })?;
 
@@ -503,12 +496,10 @@ impl AuthStorage {
                     Ok(private_keys)
                 }
                 Err(e) => {
-                    println!("❌ DEBUG AUTH: Failed to find user in database: {}", e);
                     Err(StorageError::from(e))
                 }
             }
         } else {
-            println!("❌ DEBUG AUTH: Database not initialized");
             Err(StorageError::configuration("Database not initialized"))
         }
     }
